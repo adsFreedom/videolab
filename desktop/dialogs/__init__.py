@@ -1,4 +1,4 @@
 """Диалоги."""
-from desktop.dialogs.processor_dialog import ProcessorDialog
+from desktop.dialogs.processor_dialog import ProcessorChooserDialog
 
-__all__ = ["ProcessorDialog"]
+__all__ = ["ProcessorChooserDialog"]

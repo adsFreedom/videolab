@@ -10,6 +10,8 @@ from core.processor_registry import ProcessorRegistry
 class ExtractFramesProcessor(BaseProcessor):
     name = "extract_frames"
     display_name = "Извлечение кадров"
+    category = "Видео"
+    icon = "🖼️"
 
     input_spec = {
         "video": {"mask": "*.avi", "required": True},

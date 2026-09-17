@@ -6,18 +6,18 @@ import traceback
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeView, QLabel,
-    QPushButton, QMenu, QMessageBox, QFileDialog, QStyle,
+    QPushButton, QMenu, QMessageBox, QStyle,
     QApplication, QDialog, QTextEdit, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QCursor
+from PySide6.QtGui import QAction
 
 from core.logger import log
 from core.project_manager import ProjectManager
 from core.processor_registry import ProcessorRegistry
 from core.utils import load_yaml
 from desktop.tree_model import TreeModel, ROLE_PATH, ROLE_VALID
-from desktop.dialogs.processor_dialog import ProcessorDialog
+from desktop.dialogs.processor_dialog import ProcessorChooserDialog
 
 
 class TreePanel(QWidget):
@@ -169,7 +169,6 @@ class TreePanel(QWidget):
 
         menu = QMenu(self)
 
-        # Пересчитать — только если узел невалиден И это не source
         if not is_valid and processor_type != "source":
             rescan_action = QAction("Пересчитать", self)
             rescan_action.triggered.connect(
@@ -178,7 +177,6 @@ class TreePanel(QWidget):
             menu.addAction(rescan_action)
             menu.addSeparator()
 
-        # Добавить обработчик — для всех узлов
         add_processor_action = QAction("Добавить обработчик", self)
         add_processor_action.triggered.connect(
             lambda: self._on_add_processor(node_path)
@@ -205,7 +203,6 @@ class TreePanel(QWidget):
     # ==================== ДЕЙСТВИЯ ====================
 
     def _on_rescan(self, node_path: str) -> None:
-        """Пересчитывает узел с текущими настройками."""
         if not self.project:
             return
         log("INFO", f"Пересчёт узла: {node_path}")
@@ -233,29 +230,21 @@ class TreePanel(QWidget):
             log("WARNING", f"Для узла {node_path} нет доступных обработчиков")
             return
 
-        menu = QMenu(self)
-        for processor_class in available:
-            action = menu.addAction(processor_class.display_name)
-            action.setData(processor_class.name)
-
-        chosen = menu.exec(QCursor.pos())
-        if not chosen:
-            return
-
-        processor_name = chosen.data()
-        processor_class = ProcessorRegistry.get(processor_name)
-
-        dialog = ProcessorDialog(
+        dialog = ProcessorChooserDialog(
             project=self.project,
             node_path=node_path,
-            processor_class=processor_class,
+            processors=available,
             parent=self,
         )
 
-        if dialog.exec() != ProcessorDialog.Accepted:
+        if dialog.exec() != ProcessorChooserDialog.Accepted:
             return
 
-        log("INFO", f"Запуск обработчика '{processor_name}' для узла {node_path}")
+        processor_name = dialog.result_processor_name
+        action = dialog.result_action
+
+        log("INFO",
+            f"Создание обработчика '{processor_name}' для узла {node_path}")
 
         try:
             new_node_path = self.project.create_processor_node(
@@ -265,21 +254,30 @@ class TreePanel(QWidget):
                 settings=dialog.result_settings,
             )
 
-            self.project.run_node(new_node_path)
-            self.refresh()
-            log("SUCCESS", f"Обработчик создан: {new_node_path}")
+            if action == ProcessorChooserDialog.ACTION_ADD_AND_RUN:
+                self.project.run_node(new_node_path)
+                log("SUCCESS",
+                    f"Обработчик создан и обработан: {new_node_path}")
+                QMessageBox.information(
+                    self, "Готово",
+                    f"Обработчик создан и обработан:\n{new_node_path}"
+                )
+            else:
+                log("SUCCESS",
+                    f"Обработчик создан (без обработки): {new_node_path}")
+                QMessageBox.information(
+                    self, "Готово",
+                    f"Обработчик создан:\n{new_node_path}\n\n"
+                    f"Не забудьте запустить обработку."
+                )
 
-            QMessageBox.information(
-                self, "Готово",
-                f"Обработчик создан:\n{new_node_path}"
-            )
+            self.refresh()
         except Exception as e:
             error_msg = f"Ошибка обработчика '{processor_name}': {e}"
             log("ERROR", error_msg, exc_info=True)
             self._show_error_dialog("Ошибка обработки", error_msg)
 
     def _show_error_dialog(self, title: str, message: str) -> None:
-        """Модальный диалог с копируемым текстом ошибки."""
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
         dialog.resize(750, 450)

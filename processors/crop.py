@@ -10,6 +10,8 @@ from core.processor_registry import ProcessorRegistry
 class CropProcessor(BaseProcessor):
     name = "crop"
     display_name = "Обрезка видео"
+    category = "Видео"
+    icon = "✂️"
 
     input_spec = {
         "video": {"mask": "*.avi", "required": True},
@@ -26,7 +28,7 @@ class CropProcessor(BaseProcessor):
         "end_frame": {
             "type": "spinbox",
             "label": "Конечный кадр",
-            "default": -1,  # -1 = до конца
+            "default": -1,
             "min": -1,
         },
     }
@@ -48,10 +50,8 @@ class CropProcessor(BaseProcessor):
         if end_frame == -1 or end_frame > total_frames:
             end_frame = total_frames
 
-        # Пропускаем кадры до start_frame
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-        # Настраиваем writer
         output_path = Path(output_dir) / "crop_001.avi"
         fourcc = cv2.VideoWriter_fourcc(*"XVID")
         writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
