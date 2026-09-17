@@ -2,7 +2,7 @@
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QColor
+from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtCore import Qt
 
 from core.project_manager import ProjectManager
@@ -16,10 +16,6 @@ PROCESSOR_ICONS = {
     "relative_roi": "🎯",
     "fft": "📊",
 }
-
-COLOR_VALID = QColor("#6fcf6f")
-COLOR_INVALID = QColor("#ff6b6b")
-COLOR_DEFAULT = QColor("#d4d4d4")
 
 ROLE_PATH = Qt.UserRole + 1
 ROLE_VALID = Qt.UserRole + 2
@@ -62,18 +58,15 @@ class TreeModel(QStandardItemModel):
         is_valid, _ = validation.get(path, (False, ""))
 
         icon = PROCESSOR_ICONS.get(processor_type, "📁")
-        item.setText(f"{icon} {name}")
+        status_icon = "✅" if is_valid else "❌"
 
-        status_text = "✅ Валидный" if is_valid else "❌ Требуется обработка"
+        item.setText(f"{icon} {name}  {status_icon}")
+
+        status_text = "Валидный" if is_valid else "Требуется обработка"
         item.setToolTip(f"{display_name}\nПуть: {path}\nСтатус: {status_text}")
 
         item.setData(path, ROLE_PATH)
         item.setData(is_valid, ROLE_VALID)
-
-        if is_valid:
-            item.setForeground(COLOR_VALID)
-        else:
-            item.setForeground(COLOR_INVALID)
 
         for child_data in node_data.get("children", []):
             child_item = self._create_item(child_data, validation)
