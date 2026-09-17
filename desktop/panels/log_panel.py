@@ -1,9 +1,11 @@
 """Панель лога."""
+from datetime import datetime
+import html
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
-    QPushButton, QComboBox, QLabel,
+    QPushButton, QComboBox, QLabel, QApplication,
 )
-from datetime import datetime
 
 
 class LogPanel(QWidget):
@@ -14,6 +16,7 @@ class LogPanel(QWidget):
 
         self._has_unread_errors = False
         self._has_unread_warnings = False
+        self._records: list[dict] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -29,11 +32,11 @@ class LogPanel(QWidget):
 
         toolbar.addStretch()
 
-        copy_btn = QPushButton("📋 Копировать")
+        copy_btn = QPushButton("Копировать всё")
         copy_btn.clicked.connect(self._copy_to_clipboard)
         toolbar.addWidget(copy_btn)
 
-        clear_btn = QPushButton("🗑️ Очистить")
+        clear_btn = QPushButton("Очистить")
         clear_btn.clicked.connect(self.clear_log)
         toolbar.addWidget(clear_btn)
 
@@ -43,10 +46,6 @@ class LogPanel(QWidget):
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         layout.addWidget(self.log_text)
-
-        # Храним все записи для фильтрации
-        # [{"level": "INFO", "html": "<span>...</span>"}, ...]
-        self._records: list[dict] = []
 
     # ==================== API ====================
 
@@ -60,30 +59,39 @@ class LogPanel(QWidget):
             "WARNING": "#ffcc00",
             "ERROR": "#ff6b6b",
         }
-        icon_map = {
-            "INFO": "ℹ️",
-            "SUCCESS": "✅",
-            "WARNING": "⚠️",
-            "ERROR": "❌",
+        label_map = {
+            "INFO": "INFO",
+            "SUCCESS": "OK",
+            "WARNING": "WARN",
+            "ERROR": "ERR",
         }
 
         color = color_map.get(level, "#d4d4d4")
-        icon = icon_map.get(level, "")
+        label = label_map.get(level, level)
 
-        html = (
-            f'<span style="color: #808080;">[{timestamp}]</span> '
-            f'<span style="color: {color};">{icon} {level}: {message}</span>'
-        )
+        escaped = html.escape(message)
 
-        self._records.append({"level": level, "html": html})
-        self.log_text.append(html)
+        # Многострочный текст (traceback) — оборачиваем в <pre>
+        if "\n" in escaped:
+            first_line, _, rest = escaped.partition("\n")
+            body = (
+                f'<span style="color: {color};">[{label}] {first_line}</span>'
+                f'<pre style="color: #a0a0a0; margin-left: 30px; '
+                f'font-family: Consolas, monospace; font-size: 9pt;">{rest}</pre>'
+            )
+        else:
+            body = f'<span style="color: {color};">[{label}] {escaped}</span>'
+
+        html_line = f'<span style="color: #808080;">[{timestamp}]</span> {body}'
+
+        self._records.append({"level": level, "html": html_line})
+        self.log_text.append(html_line)
 
         # Авто-прокрутка
         self.log_text.verticalScrollBar().setValue(
             self.log_text.verticalScrollBar().maximum()
         )
 
-        # Обновляем индикатор (если таб лога не активен)
         if level == "ERROR":
             self._has_unread_errors = True
         elif level == "WARNING":
@@ -112,12 +120,10 @@ class LogPanel(QWidget):
     def _apply_filter(self, level: str) -> None:
         """Применяет фильтр по уровню."""
         self.log_text.clear()
-
         for record in self._records:
             if level == "Все" or record["level"] == level:
                 self.log_text.append(record["html"])
 
     def _copy_to_clipboard(self) -> None:
         """Копирует лог в буфер обмена."""
-        from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(self.log_text.toPlainText())

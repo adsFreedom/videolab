@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QAction
 
+from core.logger import logger
 from core.project_manager import ProjectManager
 from desktop.panels import TreePanel, SettingsPanel, FilesPanel, LogPanel
 from desktop.styles import DARK_THEME
@@ -23,13 +24,16 @@ class MainWindow(QMainWindow):
         self.project: ProjectManager | None = None
         self.settings = QSettings("VideoLab", "VideoLab")
 
-        self.setWindowTitle("🎬 VideoLab")
+        self.setWindowTitle("VideoLab")
         self.resize(1400, 900)
         self.setStyleSheet(DARK_THEME)
 
         self._create_toolbar()
         self._create_central_widget()
         self._create_status_bar()
+
+        # Подписываемся на глобальный логгер ДО любых сообщений
+        logger.subscribe(self._on_global_log)
 
         self.log("INFO", "VideoLab запущен. Откройте или создайте проект.")
         self._restore_state()
@@ -98,9 +102,9 @@ class MainWindow(QMainWindow):
         self.settings_panel = SettingsPanel()
         self.files_panel = FilesPanel()
 
-        # Подключаем сигналы
         self.files_panel.file_double_clicked.connect(self._on_file_double_clicked)
         self.files_panel.node_double_clicked.connect(self._on_node_double_clicked)
+        self.settings_panel.node_updated.connect(self._on_node_updated)
 
         self.main_splitter.addWidget(self.tree_panel)
         self.main_splitter.addWidget(self.settings_panel)
@@ -124,8 +128,13 @@ class MainWindow(QMainWindow):
     # ==================== API ====================
 
     def log(self, level: str, message: str) -> None:
+        """Логирует сообщение в панель лога."""
         self.log_panel.add_log(level, message)
         self._update_log_tab_indicator()
+
+    def _on_global_log(self, level: str, message: str) -> None:
+        """Callback из глобального логгера."""
+        self.log(level, message)
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
@@ -134,19 +143,27 @@ class MainWindow(QMainWindow):
         self.project = project
         self.project_label.setText(f"Проект: {project.project_root.name}")
         self.setWindowTitle(f"VideoLab — {project.project_root.name}")
+
         self.tree_panel.load_project(project)
         self.tree_panel.node_selected.connect(self._on_node_selected)
+
+        self.settings_panel.set_project(project)
+
         self.log("SUCCESS", f"Проект открыт: {project.project_root}")
 
     def clear_project(self) -> None:
-        """Закрывает текущий проект (очищает дерево)."""
+        """Закрывает текущий проект."""
         self.project = None
         self.project_label.setText("Проект: (не открыт)")
         self.setWindowTitle("VideoLab")
+
         if hasattr(self.tree_panel, "model"):
             self.tree_panel.model.clear()
             self.tree_panel.model.setHorizontalHeaderLabels(["Узел"])
+
         self.files_panel.clear()
+        self.settings_panel.clear()
+
         self.log("INFO", "Проект закрыт")
 
     # ==================== ОБРАБОТЧИКИ СОБЫТИЙ ====================
@@ -169,12 +186,18 @@ class MainWindow(QMainWindow):
             self.main_tabs.tabBar().setTabTextColor(log_tab_index, Qt.white)
 
     def _on_node_selected(self, node_path: str) -> None:
-        """Обрабатывает выбор узла в дереве."""
         self.files_panel.load_path(node_path)
+        if self.project:
+            self.settings_panel.set_project(self.project)
+        self.settings_panel.load_node(node_path)
         self.log("INFO", f"Выбран узел: {node_path}")
 
+    def _on_node_updated(self, node_path: str) -> None:
+        self.tree_panel.refresh()
+        self.files_panel.load_path(node_path)
+        self.settings_panel.load_node(node_path)
+
     def _on_file_double_clicked(self, file_path: str) -> None:
-        """Открывает просмотрщик для файла (заглушка)."""
         name = Path(file_path).name
         self.log("INFO", f"Открытие файла: {name}")
         QMessageBox.information(
@@ -183,8 +206,8 @@ class MainWindow(QMainWindow):
         )
 
     def _on_node_double_clicked(self, node_path: str) -> None:
-        """Переходит в подпапку-узел."""
         self.files_panel.load_path(node_path)
+        self.settings_panel.load_node(node_path)
         self.log("INFO", f"Переход в узел: {node_path}")
 
     def _on_open_project(self) -> None:
@@ -276,5 +299,8 @@ class MainWindow(QMainWindow):
             )
         else:
             self.settings.remove("last_project_path")
+
+        # Отписываемся от логгера
+        logger.unsubscribe(self._on_global_log)
 
         super().closeEvent(event)

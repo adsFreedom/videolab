@@ -3,18 +3,22 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import traceback
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeView, QLabel,
     QPushButton, QMenu, QMessageBox, QFileDialog, QStyle,
-    QApplication,
+    QApplication, QDialog, QTextEdit, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QCursor
 
+from core.logger import log
 from core.project_manager import ProjectManager
+from core.processor_registry import ProcessorRegistry
 from core.utils import load_yaml
 from desktop.tree_model import TreeModel, ROLE_PATH
+from desktop.dialogs.processor_dialog import ProcessorDialog
 
 
 class TreePanel(QWidget):
@@ -42,7 +46,6 @@ class TreePanel(QWidget):
 
         style = QApplication.style()
 
-        # Кнопка "Обновить" — стандартная иконка Qt
         self.btn_refresh = QPushButton()
         self.btn_refresh.setIcon(style.standardIcon(QStyle.SP_BrowserReload))
         self.btn_refresh.setToolTip("Обновить дерево")
@@ -50,7 +53,6 @@ class TreePanel(QWidget):
         self.btn_refresh.clicked.connect(self.refresh)
         btn_layout.addWidget(self.btn_refresh)
 
-        # Кнопка "Развернуть всё" — стрелка вниз
         self.btn_expand = QPushButton()
         self.btn_expand.setIcon(style.standardIcon(QStyle.SP_ArrowDown))
         self.btn_expand.setToolTip("Развернуть всё")
@@ -58,7 +60,6 @@ class TreePanel(QWidget):
         self.btn_expand.clicked.connect(lambda: self.tree_view.expandAll())
         btn_layout.addWidget(self.btn_expand)
 
-        # Кнопка "Свернуть всё" — стрелка вверх
         self.btn_collapse = QPushButton()
         self.btn_collapse.setIcon(style.standardIcon(QStyle.SP_ArrowUp))
         self.btn_collapse.setToolTip("Свернуть всё")
@@ -74,7 +75,6 @@ class TreePanel(QWidget):
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
 
-        # Визуальные настройки
         self.tree_view.setIndentation(16)
         self.tree_view.setRootIsDecorated(True)
         self.tree_view.setUniformRowHeights(True)
@@ -149,6 +149,7 @@ class TreePanel(QWidget):
         menu.addAction(header_action)
         menu.addSeparator()
 
+        # "Добавить видео" — только для source
         if processor_type == "source":
             add_video_action = QAction("Добавить видео", self)
             add_video_action.triggered.connect(
@@ -156,13 +157,14 @@ class TreePanel(QWidget):
             )
             menu.addAction(add_video_action)
             menu.addSeparator()
-        else:
-            add_processor_action = QAction("Добавить обработчик", self)
-            add_processor_action.triggered.connect(
-                lambda: self._on_add_processor(node_path)
-            )
-            menu.addAction(add_processor_action)
-            menu.addSeparator()
+
+        # "Добавить обработчик" — для всех узлов
+        add_processor_action = QAction("Добавить обработчик", self)
+        add_processor_action.triggered.connect(
+            lambda: self._on_add_processor(node_path)
+        )
+        menu.addAction(add_processor_action)
+        menu.addSeparator()
 
         open_folder_action = QAction("Открыть в проводнике", self)
         open_folder_action.triggered.connect(
@@ -180,20 +182,96 @@ class TreePanel(QWidget):
         menu.exec(self.tree_view.mapToGlobal(pos))
 
     def _on_add_processor(self, node_path: str) -> None:
+        """Открывает диалог создания обработчика."""
         if not self.project:
             return
+
         available = self.project.get_available_processors(node_path)
-        names = [p.display_name for p in available]
-        if not names:
+
+        if not available:
             QMessageBox.information(
                 self, "Обработчики",
-                "Нет доступных обработчиков для этого узла."
+                "Нет доступных обработчиков для этого узла.\n\n"
+                "Возможно, отсутствуют подходящие входные файлы "
+                "(например, не добавлено видео)."
             )
+            log("WARNING", f"Для узла {node_path} нет доступных обработчиков")
             return
-        QMessageBox.information(
-            self, "Доступные обработчики",
-            "Для узла доступно:\n\n" + "\n".join(f"• {n}" for n in names)
+
+        menu = QMenu(self)
+        for processor_class in available:
+            action = menu.addAction(processor_class.display_name)
+            action.setData(processor_class.name)
+
+        chosen = menu.exec(QCursor.pos())
+        if not chosen:
+            return
+
+        processor_name = chosen.data()
+        processor_class = ProcessorRegistry.get(processor_name)
+
+        dialog = ProcessorDialog(
+            project=self.project,
+            node_path=node_path,
+            processor_class=processor_class,
+            parent=self,
         )
+
+        if dialog.exec() != ProcessorDialog.Accepted:
+            return
+
+        log("INFO", f"Запуск обработчика '{processor_name}' для узла {node_path}")
+
+        try:
+            new_node_path = self.project.create_processor_node(
+                parent_path=node_path,
+                processor_name=processor_name,
+                input_files=dialog.result_input_files,
+                settings=dialog.result_settings,
+            )
+
+            self.project.run_node(new_node_path)
+
+            self.refresh()
+
+            log("SUCCESS", f"Обработчик создан: {new_node_path}")
+
+            QMessageBox.information(
+                self, "Готово",
+                f"Обработчик создан:\n{new_node_path}"
+            )
+        except Exception as e:
+            error_msg = f"Ошибка обработчика '{processor_name}': {e}"
+            log("ERROR", error_msg, exc_info=True)
+            self._show_error_dialog("Ошибка обработки", error_msg)
+
+    def _show_error_dialog(self, title: str, message: str) -> None:
+        """Показывает модальный диалог с копируемым текстом ошибки."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.resize(750, 450)
+
+        layout = QVBoxLayout(dialog)
+
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+
+        full_text = message
+        tb = traceback.format_exc()
+        if tb and tb.strip() != "NoneType: None":
+            full_text = f"{message}\n\n{tb}"
+
+        text_edit.setPlainText(full_text)
+        text_edit.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
+        layout.addWidget(text_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+        buttons.accepted.connect(dialog.accept)
+        layout.addWidget(buttons)
+
+        dialog.exec()
 
     def _on_add_video(self, source_path: str) -> None:
         video_path, _ = QFileDialog.getOpenFileName(
@@ -205,8 +283,10 @@ class TreePanel(QWidget):
         try:
             self.project.register_source_video(source_path, video_path)
             self.refresh()
+            log("SUCCESS", f"Видео добавлено: {video_path}")
             QMessageBox.information(self, "Успех", "Видео добавлено")
         except Exception as e:
+            log("ERROR", f"Ошибка добавления видео: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", str(e))
 
     def _open_in_explorer(self, node_path: str) -> None:
@@ -232,5 +312,7 @@ class TreePanel(QWidget):
         try:
             shutil.rmtree(node_path)
             self.refresh()
+            log("INFO", f"Узел удален: {node_path}")
         except Exception as e:
+            log("ERROR", f"Ошибка удаления узла: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", str(e))
