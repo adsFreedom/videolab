@@ -16,7 +16,7 @@ from core.logger import log
 from core.project_manager import ProjectManager
 from core.processor_registry import ProcessorRegistry
 from core.utils import load_yaml
-from desktop.tree_model import TreeModel, ROLE_PATH
+from desktop.tree_model import TreeModel, ROLE_PATH, ROLE_VALID
 from desktop.dialogs.processor_dialog import ProcessorDialog
 
 
@@ -24,7 +24,7 @@ class TreePanel(QWidget):
     """Панель дерева проекта."""
 
     node_selected = Signal(str)
-    tree_changed = Signal()  # Сигнал: дерево изменилось
+    tree_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,17 +103,14 @@ class TreePanel(QWidget):
     def refresh(self) -> None:
         if not self.project:
             return
-        # Запоминаем выделение
         current_path = self.get_selected_path()
         self.model.load_project(self.project)
         self.tree_view.expandAll()
-        # Восстанавливаем выделение, если узел существует
         if current_path and Path(current_path).exists():
             self._select_by_path(current_path)
         self.tree_changed.emit()
 
     def _select_by_path(self, path: str) -> None:
-        """Выделяет узел по пути."""
         for row in range(self.model.rowCount()):
             index = self.model.index(row, 0)
             found = self._find_index(index, path)
@@ -163,6 +160,8 @@ class TreePanel(QWidget):
         if not node_path:
             return
 
+        is_valid = item.data(ROLE_VALID)
+
         node_path_obj = Path(node_path)
         yaml_path = node_path_obj / f"{node_path_obj.name}.yaml"
         node_data = load_yaml(yaml_path)
@@ -170,24 +169,22 @@ class TreePanel(QWidget):
 
         menu = QMenu(self)
 
-        header_action = QAction(f"{item.text()}", self)
-        header_action.setEnabled(False)
-        menu.addAction(header_action)
-        menu.addSeparator()
-
-        if processor_type == "source":
-            add_video_action = QAction("Добавить видео", self)
-            add_video_action.triggered.connect(
-                lambda: self._on_add_video(node_path)
+        # Пересчитать — только если узел невалиден И это не source
+        if not is_valid and processor_type != "source":
+            rescan_action = QAction("Пересчитать", self)
+            rescan_action.triggered.connect(
+                lambda: self._on_rescan(node_path)
             )
-            menu.addAction(add_video_action)
+            menu.addAction(rescan_action)
             menu.addSeparator()
 
+        # Добавить обработчик — для всех узлов
         add_processor_action = QAction("Добавить обработчик", self)
         add_processor_action.triggered.connect(
             lambda: self._on_add_processor(node_path)
         )
         menu.addAction(add_processor_action)
+
         menu.addSeparator()
 
         open_folder_action = QAction("Открыть в проводнике", self)
@@ -205,8 +202,23 @@ class TreePanel(QWidget):
 
         menu.exec(self.tree_view.mapToGlobal(pos))
 
+    # ==================== ДЕЙСТВИЯ ====================
+
+    def _on_rescan(self, node_path: str) -> None:
+        """Пересчитывает узел с текущими настройками."""
+        if not self.project:
+            return
+        log("INFO", f"Пересчёт узла: {node_path}")
+        try:
+            self.project.run_node(node_path)
+            self.refresh()
+            log("SUCCESS", f"Узел пересчитан: {node_path}")
+        except Exception as e:
+            error_msg = f"Ошибка пересчёта '{Path(node_path).name}': {e}"
+            log("ERROR", error_msg, exc_info=True)
+            self._show_error_dialog("Ошибка пересчёта", error_msg)
+
     def _on_add_processor(self, node_path: str) -> None:
-        """Открывает диалог создания обработчика."""
         if not self.project:
             return
 
@@ -216,8 +228,7 @@ class TreePanel(QWidget):
             QMessageBox.information(
                 self, "Обработчики",
                 "Нет доступных обработчиков для этого узла.\n\n"
-                "Возможно, отсутствуют подходящие входные файлы "
-                "(например, не добавлено видео)."
+                "Возможно, отсутствуют подходящие входные файлы."
             )
             log("WARNING", f"Для узла {node_path} нет доступных обработчиков")
             return
@@ -255,9 +266,7 @@ class TreePanel(QWidget):
             )
 
             self.project.run_node(new_node_path)
-
             self.refresh()
-
             log("SUCCESS", f"Обработчик создан: {new_node_path}")
 
             QMessageBox.information(
@@ -270,7 +279,7 @@ class TreePanel(QWidget):
             self._show_error_dialog("Ошибка обработки", error_msg)
 
     def _show_error_dialog(self, title: str, message: str) -> None:
-        """Показывает модальный диалог с копируемым текстом ошибки."""
+        """Модальный диалог с копируемым текстом ошибки."""
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
         dialog.resize(750, 450)
@@ -297,22 +306,6 @@ class TreePanel(QWidget):
 
         dialog.exec()
 
-    def _on_add_video(self, source_path: str) -> None:
-        video_path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите видео",
-            "", "Video files (*.avi *.mp4 *.mov *.mkv);;All files (*)"
-        )
-        if not video_path:
-            return
-        try:
-            self.project.register_source_video(source_path, video_path)
-            self.refresh()
-            log("SUCCESS", f"Видео добавлено: {video_path}")
-            QMessageBox.information(self, "Успех", "Видео добавлено")
-        except Exception as e:
-            log("ERROR", f"Ошибка добавления видео: {e}", exc_info=True)
-            QMessageBox.critical(self, "Ошибка", str(e))
-
     def _open_in_explorer(self, node_path: str) -> None:
         path = Path(node_path)
         if not path.exists():
@@ -326,14 +319,12 @@ class TreePanel(QWidget):
             subprocess.Popen(["xdg-open", str(path)])
 
     def _on_delete_node(self, node_path: str) -> None:
-        """Удаляет узел со всеми потомками, предупреждая пользователя."""
         if not self.project:
             return
 
         descendants = self.project.get_descendants(node_path)
 
         if descendants:
-            # Формируем список потомков для предупреждения
             preview_lines = []
             for d in descendants[:10]:
                 preview_lines.append(f"  • {Path(d).name}")
@@ -342,15 +333,13 @@ class TreePanel(QWidget):
 
             msg = (
                 f"Удалить узел «{Path(node_path).name}» и все его результаты?\n\n"
-                f"Будут удалены следующие узлы:\n"
-                + "\n".join(preview_lines)
+                f"Будут удалены следующие узлы:\n" + "\n".join(preview_lines)
             )
         else:
             msg = f"Удалить узел «{Path(node_path).name}»?"
 
         reply = QMessageBox.question(
-            self, "Удаление узла",
-            msg,
+            self, "Удаление узла", msg,
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply != QMessageBox.Yes:

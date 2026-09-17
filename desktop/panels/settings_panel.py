@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
-    QPushButton, QMessageBox, QScrollArea, QTextEdit,
+    QPushButton, QMessageBox, QScrollArea, QTextEdit, QFileDialog,
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -98,7 +98,6 @@ class SettingsPanel(QWidget):
         self.project = project
 
     def load_node(self, node_path: str) -> None:
-        """Загружает узел в панель настроек."""
         self.current_node_path = node_path
         self._clear_settings_form()
 
@@ -131,17 +130,15 @@ class SettingsPanel(QWidget):
 
         # --- source ---
         if processor_name == "source":
-            self._show_source_info(node_data)
+            self._build_source_form(node_data, node_path)
             self.btn_save.setEnabled(False)
             self.btn_apply.setEnabled(False)
         else:
             try:
                 processor_class = ProcessorRegistry.get(processor_name)
-                # Что показать в форме: текущие settings или defaults?
                 settings_to_show = node_data.get("settings", {})
                 has_snapshot = "settings_snapshot" in node_data
                 if not has_snapshot:
-                    # Узел не обработан — показываем defaults
                     settings_to_show = processor_class().get_default_settings()
                     self.status_label.setText(
                         "⚪ Узел ещё не обработан (показаны значения по умолчанию)"
@@ -182,14 +179,40 @@ class SettingsPanel(QWidget):
             if widget:
                 widget.deleteLater()
 
-    def _show_source_info(self, node_data: dict) -> None:
-        label = QLabel(
-            "<b>Исходное видео</b><br><br>"
-            f"Файл: {node_data.get('input_file', '(не задан)')}<br>"
-            f"Создан: {node_data.get('created', '-')}"
+    def _build_source_form(self, node_data: dict, node_path: str) -> None:
+        """Форма для source_0: выбор видеофайла."""
+        current = node_data.get("input_file") or "(видео не выбрано)"
+
+        info = QLabel(f"<b>Текущий файл:</b><br>{current}")
+        info.setWordWrap(True)
+        self.settings_container_layout.addWidget(info)
+
+        btn = QPushButton("Выбрать видео...")
+        btn.clicked.connect(lambda: self._on_select_source_video(node_path))
+        self.settings_container_layout.addWidget(btn)
+
+        self.settings_container_layout.addStretch()
+
+    def _on_select_source_video(self, source_path: str) -> None:
+        """Открывает диалог выбора видео для source_0."""
+        if not self.project:
+            return
+
+        video_path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите видео",
+            "", "Video files (*.avi *.mp4 *.mov *.mkv);;All files (*)"
         )
-        label.setWordWrap(True)
-        self.settings_container_layout.addWidget(label)
+        if not video_path:
+            return
+
+        try:
+            self.project.register_source_video(source_path, video_path)
+            log("SUCCESS", f"Видео зарегистрировано: {video_path}")
+            self.node_updated.emit(source_path)
+            QMessageBox.information(self, "Успех", "Видео добавлено")
+        except Exception as e:
+            log("ERROR", f"Ошибка добавления видео: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", str(e))
 
     def _build_settings_form(
         self,
@@ -214,7 +237,6 @@ class SettingsPanel(QWidget):
         lines.append(f"<b>Обработчик:</b> {node_data.get('processor', '-')}")
         lines.append(f"<b>Создан:</b> {node_data.get('created', '-')}")
 
-        # Входные файлы
         input_files = node_data.get("input_files", {})
         input_snapshot = node_data.get("input_files_snapshot")
         if input_files:
@@ -228,7 +250,6 @@ class SettingsPanel(QWidget):
                         match = " ⚠ изменено"
                 lines.append(f"  • {key}: {value}{match}")
 
-        # Настройки
         settings = node_data.get("settings", {})
         snapshot = node_data.get("settings_snapshot")
         if settings:
@@ -236,7 +257,6 @@ class SettingsPanel(QWidget):
             lines.append(f"  Текущие: {settings}")
             if snapshot is not None:
                 lines.append(f"  Snapshot: {snapshot}")
-                # Ищем различия
                 diffs = []
                 all_keys = set(settings.keys()) | set(snapshot.keys())
                 for key in sorted(all_keys):
@@ -250,7 +270,6 @@ class SettingsPanel(QWidget):
             else:
                 lines.append("  <i>(snapshot отсутствует — узел не обработан)</i>")
 
-        # Выходные файлы
         expected = node_data.get("expected_outputs")
         if expected:
             lines.append("<br><b>Ожидаемые выходы:</b>")
@@ -258,7 +277,6 @@ class SettingsPanel(QWidget):
                 exists = "OK" if (Path(node_path) / f).exists() else "MISS"
                 lines.append(f"  [{exists}] {f}")
 
-        # Статус
         if self.project:
             is_valid, msg = self.project.validate_node(node_path)
             status = "✅ Валидный" if is_valid else f"❌ {msg}"
@@ -269,7 +287,7 @@ class SettingsPanel(QWidget):
     # ==================== СОБЫТИЯ ====================
 
     def _on_save(self) -> None:
-        """Сохраняет настройки без перезапуска. Узел станет красным."""
+        """Сохраняет настройки без перезапуска."""
         if not self.current_node_path or not hasattr(self, "schema_form"):
             return
 
