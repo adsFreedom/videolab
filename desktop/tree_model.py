@@ -6,10 +6,8 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem, QColor
 from PySide6.QtCore import Qt
 
 from core.project_manager import ProjectManager
-from core.utils import load_yaml
 
 
-# Иконки для типов обработчиков
 PROCESSOR_ICONS = {
     "source": "📼",
     "crop": "✂️",
@@ -19,17 +17,16 @@ PROCESSOR_ICONS = {
     "fft": "📊",
 }
 
-# Цвета
 COLOR_VALID = QColor("#6fcf6f")
 COLOR_INVALID = QColor("#ff6b6b")
 COLOR_DEFAULT = QColor("#d4d4d4")
 
-# Роли для хранения данных
 ROLE_PATH = Qt.UserRole + 1
+ROLE_VALID = Qt.UserRole + 2
 
 
 class TreeModel(QStandardItemModel):
-    """Модель дерева проекта на основе QStandardItemModel."""
+    """Модель дерева проекта."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,49 +40,46 @@ class TreeModel(QStandardItemModel):
         self.setHorizontalHeaderLabels(["Узел"])
 
         tree_data = project.get_tree()
+        validation = project.validate_tree()
 
         for child_data in tree_data.get("children", []):
-            item = self._create_item(child_data)
+            item = self._create_item(child_data, validation)
             self.appendRow(item)
 
-    def _create_item(self, node_data: dict[str, Any]) -> QStandardItem:
+    def _create_item(
+        self,
+        node_data: dict[str, Any],
+        validation: dict[str, tuple[bool, str]],
+    ) -> QStandardItem:
         """Создает QStandardItem из данных узла."""
         item = QStandardItem()
 
         name = node_data["name"]
         display_name = node_data.get("display_name", name)
-        is_valid = node_data.get("is_valid", False)
         path = node_data["path"]
+        processor_type = node_data.get("processor", "")
 
-        yaml_path = Path(path) / f"{name}.yaml"
-        processor_type = self._get_processor_type(yaml_path)
+        is_valid, _ = validation.get(path, (False, ""))
 
         icon = PROCESSOR_ICONS.get(processor_type, "📁")
-
         item.setText(f"{icon} {name}")
 
-        status_text = "✅ Валидный" if is_valid else "❌ Невалидный"
+        status_text = "✅ Валидный" if is_valid else "❌ Требуется обработка"
         item.setToolTip(f"{display_name}\nПуть: {path}\nСтатус: {status_text}")
 
         item.setData(path, ROLE_PATH)
+        item.setData(is_valid, ROLE_VALID)
 
-        if not is_valid:
-            item.setForeground(COLOR_INVALID)
-        else:
+        if is_valid:
             item.setForeground(COLOR_VALID)
+        else:
+            item.setForeground(COLOR_INVALID)
 
         for child_data in node_data.get("children", []):
-            child_item = self._create_item(child_data)
+            child_item = self._create_item(child_data, validation)
             item.appendRow(child_item)
 
         return item
-
-    def _get_processor_type(self, yaml_path: Path) -> str:
-        """Читает тип обработчика из YAML."""
-        if not yaml_path.exists():
-            return ""
-        data = load_yaml(yaml_path)
-        return data.get("processor", "")
 
     def get_path(self, index) -> str:
         """Возвращает путь к узлу по QModelIndex."""

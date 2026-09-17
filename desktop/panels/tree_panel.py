@@ -1,6 +1,5 @@
 """Панель дерева проекта."""
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import traceback
@@ -25,6 +24,7 @@ class TreePanel(QWidget):
     """Панель дерева проекта."""
 
     node_selected = Signal(str)
+    tree_changed = Signal()  # Сигнал: дерево изменилось
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -35,7 +35,6 @@ class TreePanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # --- Заголовок ---
         header = QLabel("Дерево проекта")
         header.setStyleSheet("font-weight: bold; padding: 4px;")
         layout.addWidget(header)
@@ -84,7 +83,6 @@ class TreePanel(QWidget):
         self.tree_view.setSelectionMode(QTreeView.SingleSelection)
         self.tree_view.setAllColumnsShowFocus(True)
 
-        # Модель ДО сигналов
         self.model = TreeModel(self)
         self.tree_view.setModel(self.model)
 
@@ -105,8 +103,36 @@ class TreePanel(QWidget):
     def refresh(self) -> None:
         if not self.project:
             return
+        # Запоминаем выделение
+        current_path = self.get_selected_path()
         self.model.load_project(self.project)
         self.tree_view.expandAll()
+        # Восстанавливаем выделение, если узел существует
+        if current_path and Path(current_path).exists():
+            self._select_by_path(current_path)
+        self.tree_changed.emit()
+
+    def _select_by_path(self, path: str) -> None:
+        """Выделяет узел по пути."""
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            found = self._find_index(index, path)
+            if found:
+                self.tree_view.setCurrentIndex(found)
+                return
+
+    def _find_index(self, index, path: str):
+        if not index.isValid():
+            return None
+        item = self.model.itemFromIndex(index)
+        if item.data(ROLE_PATH) == path:
+            return index
+        for row in range(self.model.rowCount(index)):
+            child = self.model.index(row, 0, index)
+            result = self._find_index(child, path)
+            if result:
+                return result
+        return None
 
     def get_selected_path(self) -> str:
         index = self.tree_view.currentIndex()
@@ -149,7 +175,6 @@ class TreePanel(QWidget):
         menu.addAction(header_action)
         menu.addSeparator()
 
-        # "Добавить видео" — только для source
         if processor_type == "source":
             add_video_action = QAction("Добавить видео", self)
             add_video_action.triggered.connect(
@@ -158,7 +183,6 @@ class TreePanel(QWidget):
             menu.addAction(add_video_action)
             menu.addSeparator()
 
-        # "Добавить обработчик" — для всех узлов
         add_processor_action = QAction("Добавить обработчик", self)
         add_processor_action.triggered.connect(
             lambda: self._on_add_processor(node_path)
@@ -302,15 +326,38 @@ class TreePanel(QWidget):
             subprocess.Popen(["xdg-open", str(path)])
 
     def _on_delete_node(self, node_path: str) -> None:
+        """Удаляет узел со всеми потомками, предупреждая пользователя."""
+        if not self.project:
+            return
+
+        descendants = self.project.get_descendants(node_path)
+
+        if descendants:
+            # Формируем список потомков для предупреждения
+            preview_lines = []
+            for d in descendants[:10]:
+                preview_lines.append(f"  • {Path(d).name}")
+            if len(descendants) > 10:
+                preview_lines.append(f"  ... и ещё {len(descendants) - 10}")
+
+            msg = (
+                f"Удалить узел «{Path(node_path).name}» и все его результаты?\n\n"
+                f"Будут удалены следующие узлы:\n"
+                + "\n".join(preview_lines)
+            )
+        else:
+            msg = f"Удалить узел «{Path(node_path).name}»?"
+
         reply = QMessageBox.question(
             self, "Удаление узла",
-            f"Удалить узел и все его результаты?\n\n{node_path}",
+            msg,
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
+
         try:
-            shutil.rmtree(node_path)
+            self.project.delete_node(node_path)
             self.refresh()
             log("INFO", f"Узел удален: {node_path}")
         except Exception as e:
