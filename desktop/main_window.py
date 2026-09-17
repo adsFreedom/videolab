@@ -31,7 +31,6 @@ class MainWindow(QMainWindow):
         self._create_central_widget()
         self._create_status_bar()
 
-        # Сначала логируем, потом восстанавливаем (чтобы лог был доступен)
         self.log("INFO", "VideoLab запущен. Откройте или создайте проект.")
         self._restore_state()
 
@@ -42,33 +41,33 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        open_action = QAction("📂 Открыть проект", self)
+        open_action = QAction("Открыть проект", self)
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._on_open_project)
         toolbar.addAction(open_action)
 
-        create_action = QAction("✨ Создать проект", self)
+        create_action = QAction("Создать проект", self)
         create_action.setShortcut("Ctrl+N")
         create_action.triggered.connect(self._on_create_project)
         toolbar.addAction(create_action)
 
         toolbar.addSeparator()
 
-        record_action = QAction("🎥 Записать", self)
+        record_action = QAction("Записать", self)
         record_action.setShortcut("Ctrl+R")
         record_action.triggered.connect(self._on_record_video)
         toolbar.addAction(record_action)
 
         toolbar.addSeparator()
 
-        refresh_action = QAction("🔄 Обновить", self)
+        refresh_action = QAction("Обновить", self)
         refresh_action.setShortcut("F5")
         refresh_action.triggered.connect(self._on_refresh)
         toolbar.addAction(refresh_action)
 
         toolbar.addSeparator()
 
-        close_action = QAction("❌ Закрыть проект", self)
+        close_action = QAction("Закрыть проект", self)
         close_action.setShortcut("Ctrl+W")
         close_action.triggered.connect(self._on_close_project)
         toolbar.addAction(close_action)
@@ -79,10 +78,10 @@ class MainWindow(QMainWindow):
         self.main_tabs.setMovable(False)
 
         self.project_tab = self._create_project_tab()
-        self.main_tabs.addTab(self.project_tab, "🗂️ Проект")
+        self.main_tabs.addTab(self.project_tab, "Проект")
 
         self.log_panel = LogPanel()
-        self.main_tabs.addTab(self.log_panel, "📋 Лог")
+        self.main_tabs.addTab(self.log_panel, "Лог")
 
         self.main_tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -98,6 +97,10 @@ class MainWindow(QMainWindow):
         self.tree_panel = TreePanel()
         self.settings_panel = SettingsPanel()
         self.files_panel = FilesPanel()
+
+        # Подключаем сигналы
+        self.files_panel.file_double_clicked.connect(self._on_file_double_clicked)
+        self.files_panel.node_double_clicked.connect(self._on_node_double_clicked)
 
         self.main_splitter.addWidget(self.tree_panel)
         self.main_splitter.addWidget(self.settings_panel)
@@ -130,7 +133,7 @@ class MainWindow(QMainWindow):
     def set_project(self, project: ProjectManager) -> None:
         self.project = project
         self.project_label.setText(f"Проект: {project.project_root.name}")
-        self.setWindowTitle(f"🎬 VideoLab — {project.project_root.name}")
+        self.setWindowTitle(f"VideoLab — {project.project_root.name}")
         self.tree_panel.load_project(project)
         self.tree_panel.node_selected.connect(self._on_node_selected)
         self.log("SUCCESS", f"Проект открыт: {project.project_root}")
@@ -139,11 +142,11 @@ class MainWindow(QMainWindow):
         """Закрывает текущий проект (очищает дерево)."""
         self.project = None
         self.project_label.setText("Проект: (не открыт)")
-        self.setWindowTitle("🎬 VideoLab")
-        # Очищаем дерево
+        self.setWindowTitle("VideoLab")
         if hasattr(self.tree_panel, "model"):
             self.tree_panel.model.clear()
             self.tree_panel.model.setHorizontalHeaderLabels(["Узел"])
+        self.files_panel.clear()
         self.log("INFO", "Проект закрыт")
 
     # ==================== ОБРАБОТЧИКИ СОБЫТИЙ ====================
@@ -156,17 +159,33 @@ class MainWindow(QMainWindow):
     def _update_log_tab_indicator(self) -> None:
         log_tab_index = 1
         if self.log_panel.has_unread_errors():
-            self.main_tabs.setTabText(log_tab_index, "📋 Лог 🔴")
+            self.main_tabs.setTabText(log_tab_index, "Лог (ошибки)")
             self.main_tabs.tabBar().setTabTextColor(log_tab_index, Qt.red)
         elif self.log_panel.has_unread_warnings():
-            self.main_tabs.setTabText(log_tab_index, "📋 Лог 🟡")
+            self.main_tabs.setTabText(log_tab_index, "Лог (предупреждения)")
             self.main_tabs.tabBar().setTabTextColor(log_tab_index, Qt.yellow)
         else:
-            self.main_tabs.setTabText(log_tab_index, "📋 Лог")
+            self.main_tabs.setTabText(log_tab_index, "Лог")
             self.main_tabs.tabBar().setTabTextColor(log_tab_index, Qt.white)
 
     def _on_node_selected(self, node_path: str) -> None:
+        """Обрабатывает выбор узла в дереве."""
+        self.files_panel.load_path(node_path)
         self.log("INFO", f"Выбран узел: {node_path}")
+
+    def _on_file_double_clicked(self, file_path: str) -> None:
+        """Открывает просмотрщик для файла (заглушка)."""
+        name = Path(file_path).name
+        self.log("INFO", f"Открытие файла: {name}")
+        QMessageBox.information(
+            self, "Просмотр файла",
+            f"Просмотрщик будет добавлен позже.\n\nФайл:\n{file_path}"
+        )
+
+    def _on_node_double_clicked(self, node_path: str) -> None:
+        """Переходит в подпапку-узел."""
+        self.files_panel.load_path(node_path)
+        self.log("INFO", f"Переход в узел: {node_path}")
 
     def _on_open_project(self) -> None:
         folder = QFileDialog.getExistingDirectory(
@@ -212,10 +231,10 @@ class MainWindow(QMainWindow):
             self.log("WARNING", "Проект не открыт")
             return
         self.tree_panel.refresh()
-        self.log("SUCCESS", "Дерево обновлено")
+        self.files_panel.refresh()
+        self.log("SUCCESS", "Обновлено")
 
     def _on_close_project(self) -> None:
-        """Закрывает текущий проект."""
         if not self.project:
             return
         reply = QMessageBox.question(
@@ -230,7 +249,6 @@ class MainWindow(QMainWindow):
     # ==================== СОХРАНЕНИЕ СОСТОЯНИЯ ====================
 
     def _restore_state(self) -> None:
-        """Восстанавливает состояние из QSettings."""
         geometry = self.settings.value("geometry")
         if geometry:
             self.restoreGeometry(geometry)
@@ -239,7 +257,6 @@ class MainWindow(QMainWindow):
         if main_sizes:
             self.main_splitter.setSizes([int(x) for x in main_sizes])
 
-        # Автозагрузка последнего проекта
         last_project = self.settings.value("last_project_path", "")
         if last_project and Path(last_project).exists():
             try:
@@ -250,7 +267,6 @@ class MainWindow(QMainWindow):
                 self.log("WARNING", f"Не удалось загрузить последний проект: {e}")
 
     def closeEvent(self, event) -> None:
-        """Сохраняет состояние при закрытии."""
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("main_splitter_sizes", self.main_splitter.sizes())
 
