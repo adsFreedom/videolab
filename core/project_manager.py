@@ -61,6 +61,7 @@ class ProjectManager:
                 "created": timestamp(),
                 "input_file": None,
                 "settings": {},
+                "last_run_at": None,
             })
 
         return cls(project_path)
@@ -168,6 +169,8 @@ class ProjectManager:
         yaml_file = source_node_path / f"{source_node_path.name}.yaml"
         data = load_yaml(yaml_file)
         data["input_file"] = str(target)
+        # При добавлении/замене видео обновляем время — дети увидят изменение
+        data["last_run_at"] = timestamp()
         save_yaml(yaml_file, data)
 
     # ==================== ПОИСК ВХОДНЫХ ФАЙЛОВ ====================
@@ -229,16 +232,32 @@ class ProjectManager:
         processor_class = ProcessorRegistry.get(processor_name)
         return processor_class()
 
+    def _get_parent_run_at(self, node_path: Path) -> str | None:
+        """
+        Возвращает last_run_at родительского узла.
+        Если родитель — не узел, возвращает None.
+        """
+        parent_path = node_path.parent
+        parent_yaml = parent_path / f"{parent_path.name}.yaml"
+
+        if not parent_yaml.exists():
+            return None
+
+        parent_data = load_yaml(parent_yaml)
+        return parent_data.get("last_run_at")
+
     def run_node(self, node_path: str) -> dict:
         """
         Запускает обработку для узла.
-        После УСПЕШНОЙ обработки сохраняет snapshot настроек и входов.
-        При ошибке — snapshot НЕ пишется, узел остаётся красным.
+        После УСПЕШНОЙ обработки сохраняет:
+        - settings_snapshot и input_files_snapshot
+        - last_run_at (время обработки)
         """
+        node_path_obj = Path(node_path)
         node_data = self.get_node_info(node_path)
         processor = self.get_node_processor(node_path)
 
-        # Если обработка упадёт — исключение уйдёт наверх, snapshot не сохранится
+        # Если упадёт — snapshot и метка НЕ сохранятся
         result = processor.run(
             input_files=node_data.get("input_files", {}),
             settings=node_data.get("settings", {}),
@@ -246,14 +265,14 @@ class ProjectManager:
         )
 
         # --- Успешная обработка: обновляем YAML ---
-        yaml_file = Path(node_path) / f"{Path(node_path).name}.yaml"
+        yaml_file = node_path_obj / f"{node_path_obj.name}.yaml"
 
         if result.get("output_files"):
             node_data["expected_outputs"] = result["output_files"]
 
-        # Snapshot = то, с чем реально прошла обработка
         node_data["settings_snapshot"] = dict(node_data.get("settings", {}))
         node_data["input_files_snapshot"] = dict(node_data.get("input_files", {}))
+        node_data["last_run_at"] = timestamp()
 
         save_yaml(yaml_file, node_data)
 
@@ -262,16 +281,13 @@ class ProjectManager:
     # ==================== ВАЛИДАЦИЯ ====================
 
     def validate_node(self, node_path: str) -> tuple[bool, str]:
-        """
-        Проверяет ОДИН узел (без учёта родителей).
-        Для полной проверки используйте validate_tree().
-        """
-        node_path = Path(node_path)
+        """Проверяет ОДИН узел (без учёта валидности родителей)."""
+        node_path_obj = Path(node_path)
 
-        if not node_path.exists():
+        if not node_path_obj.exists():
             return False, "Требуется обработка"
 
-        yaml_file = node_path / f"{node_path.name}.yaml"
+        yaml_file = node_path_obj / f"{node_path_obj.name}.yaml"
         if not yaml_file.exists():
             return False, "Требуется обработка"
 
@@ -291,20 +307,20 @@ class ProjectManager:
         except KeyError:
             return False, "Требуется обработка"
 
-        # 1. Есть ли snapshot?
+        # 1. Snapshot есть?
         if "settings_snapshot" not in node_data:
             return False, "Требуется обработка"
 
-        # 2. Есть ли выходные файлы?
+        # 2. Выходные файлы на месте?
         expected = node_data.get("expected_outputs")
         if expected:
             for filename in expected:
-                if not (node_path / filename).exists():
+                if not (node_path_obj / filename).exists():
                     return False, "Требуется обработка"
         else:
             output_mask = processor_class.output_mask
             matches = [
-                f for f in node_path.iterdir()
+                f for f in node_path_obj.iterdir()
                 if f.is_file() and fnmatch.fnmatch(f.name, output_mask)
             ]
             if not matches:
@@ -318,15 +334,19 @@ class ProjectManager:
         if node_data.get("input_files") != node_data.get("input_files_snapshot"):
             return False, "Требуется обработка"
 
+        # 5. Родитель обработан не позже нас?
+        parent_run_at = self._get_parent_run_at(node_path_obj)
+        if parent_run_at is not None:
+            my_run_at = node_data.get("last_run_at")
+            if my_run_at is None:
+                return False, "Требуется обработка"
+            if my_run_at < parent_run_at:
+                return False, "Требуется обработка"
+
         return True, ""
 
     def validate_tree(self) -> dict[str, tuple[bool, str]]:
-        """
-        Валидирует всё дерево сверху вниз.
-        Возвращает {node_path: (is_valid, message)}.
-
-        Правило: если родитель невалиден — ребёнок тоже невалиден.
-        """
+        """Валидирует всё дерево сверху вниз."""
         result: dict[str, tuple[bool, str]] = {}
 
         def _walk(node_path: Path, parent_valid: bool) -> None:
@@ -341,7 +361,6 @@ class ProjectManager:
                 is_valid, msg = self.validate_node(str(node_path))
                 result[str(node_path)] = (is_valid, msg)
 
-            # Идём по детям
             if node_path.is_dir():
                 for child in sorted(node_path.iterdir()):
                     if child.is_dir():
@@ -349,7 +368,6 @@ class ProjectManager:
                         if child_yaml.exists():
                             _walk(child, is_valid)
 
-        # Начинаем с корня проекта — но он не узел, идём сразу по source_0 и т.п.
         for item in sorted(self.project_root.iterdir()):
             if item.is_dir():
                 yaml_file = item / f"{item.name}.yaml"
@@ -361,11 +379,7 @@ class ProjectManager:
     # ==================== УДАЛЕНИЕ С КАСКАДОМ ====================
 
     def get_descendants(self, node_path: str) -> list[str]:
-        """
-        Возвращает список ВСЕХ потомков узла (рекурсивно),
-        включая сам узел в конце списка (для удобства удаления).
-        Порядок: сначала дети, потом сам узел.
-        """
+        """Возвращает список ВСЕХ потомков узла (рекурсивно)."""
         node_path_obj = Path(node_path)
         descendants: list[str] = []
 

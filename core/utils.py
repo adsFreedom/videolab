@@ -41,14 +41,14 @@ def find_project_root(start_path: str | Path) -> Path | None:
     while True:
         if (current / PROJECT_MARKER).exists():
             return current
-        if current.parent == current:  # Дошли до корня диска
+        if current.parent == current:
             return None
         current = current.parent
 
 
 def timestamp() -> str:
-    """Возвращает текущую дату-время в читаемом формате."""
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """Возвращает текущую дату-время с микросекундами."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
 def ensure_dir(path: str | Path) -> Path:
