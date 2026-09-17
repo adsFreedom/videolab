@@ -64,7 +64,8 @@ class SchemaForm(QWidget):
             w.setSingleStep(param.get("step", 1))
             if default is not None:
                 w.setValue(int(default))
-            w.valueChanged.connect(self.value_changed.emit)
+            # Лямбда игнорирует аргумент int, который передает Qt
+            w.valueChanged.connect(lambda _: self.value_changed.emit())
             return w
 
         elif ptype == "double_spinbox":
@@ -75,21 +76,23 @@ class SchemaForm(QWidget):
             w.setDecimals(param.get("decimals", 3))
             if default is not None:
                 w.setValue(float(default))
-            w.valueChanged.connect(self.value_changed.emit)
+            w.valueChanged.connect(lambda _: self.value_changed.emit())
             return w
 
         elif ptype == "checkbox":
             w = QCheckBox()
             if default is not None:
                 w.setChecked(bool(default))
-            w.stateChanged.connect(self.value_changed.emit)
+            # stateChanged передает int
+            w.stateChanged.connect(lambda _: self.value_changed.emit())
             return w
 
         elif ptype == "lineedit":
             w = QLineEdit()
             if default is not None:
                 w.setText(str(default))
-            w.textChanged.connect(self.value_changed.emit)
+            # textChanged передает str
+            w.textChanged.connect(lambda _: self.value_changed.emit())
             return w
 
         elif ptype == "combobox":
@@ -98,10 +101,10 @@ class SchemaForm(QWidget):
             w.addItems([str(o) for o in options])
             if default is not None and default in options:
                 w.setCurrentText(str(default))
-            w.currentTextChanged.connect(self.value_changed.emit)
+            # currentTextChanged передает str
+            w.currentTextChanged.connect(lambda _: self.value_changed.emit())
             return w
 
-        # Неизвестный тип — создаем заглушку
         return None
 
     def get_values(self) -> dict:
@@ -139,6 +142,4 @@ class SchemaForm(QWidget):
 
     def validate(self) -> tuple[bool, str]:
         """Проверяет валидность значений формы."""
-        # Базовая валидация min/max уже сделана QSpinBox.
-        # Здесь можно добавить кросс-валидацию (например, start < end).
         return True, ""
