@@ -169,7 +169,7 @@ class TreePanel(QWidget):
 
         menu = QMenu(self)
 
-        if not is_valid and processor_type != "source":
+        if processor_type != "source":
             rescan_action = QAction("Пересчитать", self)
             rescan_action.triggered.connect(
                 lambda: self._on_rescan(node_path)
