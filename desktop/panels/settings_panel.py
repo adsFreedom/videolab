@@ -18,6 +18,7 @@ class SettingsPanel(QWidget):
     """Панель настроек выбранного узла."""
 
     node_updated = Signal(str)
+    run_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -118,7 +119,6 @@ class SettingsPanel(QWidget):
 
         self.settings_header.setText(f"{display_name} ({node_path_obj.name})")
 
-        # Статус
         if self.project:
             is_valid, _ = self.project.validate_node(node_path)
             if is_valid:
@@ -128,7 +128,6 @@ class SettingsPanel(QWidget):
                 self.status_label.setText("❌ Требуется обработка")
                 self.status_label.setStyleSheet("color: #ff6b6b; padding: 4px;")
 
-        # --- source ---
         if processor_name == "source":
             self._build_source_form(node_data, node_path)
             self.btn_save.setEnabled(False)
@@ -180,7 +179,6 @@ class SettingsPanel(QWidget):
                 widget.deleteLater()
 
     def _build_source_form(self, node_data: dict, node_path: str) -> None:
-        """Форма для source_0: выбор видеофайла."""
         current = node_data.get("input_file") or "(видео не выбрано)"
 
         info = QLabel(f"<b>Текущий файл:</b><br>{current}")
@@ -194,7 +192,6 @@ class SettingsPanel(QWidget):
         self.settings_container_layout.addStretch()
 
     def _on_select_source_video(self, source_path: str) -> None:
-        """Открывает диалог выбора видео для source_0."""
         if not self.project:
             return
 
@@ -270,6 +267,15 @@ class SettingsPanel(QWidget):
             else:
                 lines.append("  <i>(snapshot отсутствует — узел не обработан)</i>")
 
+        # Время обработки
+        duration = node_data.get("last_duration_seconds")
+        if duration is not None:
+            lines.append(f"<br><b>Время последней обработки:</b> {duration} сек")
+
+        last_run = node_data.get("last_run_at")
+        if last_run:
+            lines.append(f"<b>Последний запуск:</b> {last_run}")
+
         expected = node_data.get("expected_outputs")
         if expected:
             lines.append("<br><b>Ожидаемые выходы:</b>")
@@ -287,7 +293,6 @@ class SettingsPanel(QWidget):
     # ==================== СОБЫТИЯ ====================
 
     def _on_save(self) -> None:
-        """Сохраняет настройки без перезапуска."""
         if not self.current_node_path or not hasattr(self, "schema_form"):
             return
 
@@ -313,7 +318,7 @@ class SettingsPanel(QWidget):
             QMessageBox.critical(self, "Ошибка", str(e))
 
     def _on_apply(self) -> None:
-        """Сохраняет и перезапускает обработку."""
+        """Сохраняет настройки и эмитит сигнал запуска."""
         if not self.current_node_path or not hasattr(self, "schema_form"):
             return
 
@@ -336,13 +341,10 @@ class SettingsPanel(QWidget):
             node_data["settings"] = new_settings
             save_yaml(yaml_path, node_data)
 
-            log("INFO", f"Перезапуск обработки: {self.current_node_path}")
+            log("INFO", f"Запуск обработки: {self.current_node_path}")
 
-            self.project.run_node(self.current_node_path)
-
-            log("SUCCESS", f"Обработка завершена: {self.current_node_path}")
-            QMessageBox.information(self, "Готово", "Обработка завершена")
-            self.node_updated.emit(self.current_node_path)
+            # Эмитим сигнал — MainWindow запустит с прогрессом
+            self.run_requested.emit(self.current_node_path)
         except Exception as e:
-            log("ERROR", f"Ошибка обработки: {e}", exc_info=True)
+            log("ERROR", f"Ошибка подготовки к запуску: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", str(e))

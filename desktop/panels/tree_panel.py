@@ -205,15 +205,17 @@ class TreePanel(QWidget):
     def _on_rescan(self, node_path: str) -> None:
         if not self.project:
             return
-        log("INFO", f"Пересчёт узла: {node_path}")
+
+        node_data = load_yaml(Path(node_path) / f"{Path(node_path).name}.yaml")
+        processor_name = node_data.get("processor", "")
         try:
-            self.project.run_node(node_path)
-            self.refresh()
-            log("SUCCESS", f"Узел пересчитан: {node_path}")
-        except Exception as e:
-            error_msg = f"Ошибка пересчёта '{Path(node_path).name}': {e}"
-            log("ERROR", error_msg, exc_info=True)
-            self._show_error_dialog("Ошибка пересчёта", error_msg)
+            processor_class = ProcessorRegistry.get(processor_name)
+        except KeyError:
+            log("ERROR", f"Обработчик '{processor_name}' не зарегистрирован")
+            return
+
+        log("INFO", f"Пересчёт узла: {node_path}")
+        self._run_with_progress(node_path, processor_class)
 
     def _on_add_processor(self, node_path: str) -> None:
         if not self.project:
@@ -243,8 +245,7 @@ class TreePanel(QWidget):
         processor_name = dialog.result_processor_name
         action = dialog.result_action
 
-        log("INFO",
-            f"Создание обработчика '{processor_name}' для узла {node_path}")
+        log("INFO", f"Создание обработчика '{processor_name}' для узла {node_path}")
 
         try:
             new_node_path = self.project.create_processor_node(
@@ -254,26 +255,57 @@ class TreePanel(QWidget):
                 settings=dialog.result_settings,
             )
 
+            processor_class = ProcessorRegistry.get(processor_name)
+
             if action == ProcessorChooserDialog.ACTION_ADD_AND_RUN:
-                self.project.run_node(new_node_path)
-                log("SUCCESS",
-                    f"Обработчик создан и обработан: {new_node_path}")
+                self._run_with_progress(new_node_path, processor_class)
                 QMessageBox.information(
                     self, "Готово",
-                    f"Обработчик создан и обработан:\n{new_node_path}"
+                    f"Обработчик создан:\n{new_node_path}"
                 )
             else:
-                log("SUCCESS",
-                    f"Обработчик создан (без обработки): {new_node_path}")
+                log("SUCCESS", f"Обработчик создан (без обработки): {new_node_path}")
+                self.refresh()
                 QMessageBox.information(
                     self, "Готово",
                     f"Обработчик создан:\n{new_node_path}\n\n"
                     f"Не забудьте запустить обработку."
                 )
-
-            self.refresh()
         except Exception as e:
             error_msg = f"Ошибка обработчика '{processor_name}': {e}"
+            log("ERROR", error_msg, exc_info=True)
+            self._show_error_dialog("Ошибка обработки", error_msg)
+
+    def _run_with_progress(self, node_path: str, processor_class: type) -> None:
+        """Запускает обработку с модальным прогресс-диалогом."""
+        from desktop.dialogs.progress_dialog import ProgressDialog
+        from core.execution import ExecutionContext
+
+        node_name = Path(node_path).name
+        title = f"{processor_class.icon} {processor_class.display_name}"
+
+        context = ExecutionContext()
+        dialog = ProgressDialog(node_name, title, context, parent=self)
+        dialog.show()
+
+        QApplication.processEvents()
+
+        try:
+            result = self.project.run_node(node_path, context=context)
+            dialog.accept()
+
+            if result.get("cancelled"):
+                log("WARNING", f"Обработка отменена: {node_path}")
+                QMessageBox.information(
+                    self, "Отменено",
+                    "Обработка была отменена пользователем."
+                )
+            else:
+                self.refresh()
+                log("SUCCESS", f"Узел обработан: {node_path}")
+        except Exception as e:
+            dialog.accept()
+            error_msg = f"Ошибка обработки '{node_name}': {e}"
             log("ERROR", error_msg, exc_info=True)
             self._show_error_dialog("Ошибка обработки", error_msg)
 

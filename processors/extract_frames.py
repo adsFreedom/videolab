@@ -3,6 +3,7 @@ from pathlib import Path
 import cv2
 
 from core.base_processor import BaseProcessor
+from core.execution import ExecutionContext
 from core.processor_registry import ProcessorRegistry
 
 
@@ -35,7 +36,7 @@ class ExtractFramesProcessor(BaseProcessor):
         },
     }
 
-    def run(self, input_files, settings, output_dir):
+    def run(self, input_files, settings, output_dir, context: ExecutionContext):
         video_path = input_files["video"]
         step = settings.get("step", 1)
         max_frames = settings.get("max_frames", 100)
@@ -49,6 +50,7 @@ class ExtractFramesProcessor(BaseProcessor):
         saved = 0
 
         while saved < max_frames:
+            context.check_cancel()
             ret, frame = cap.read()
             if not ret:
                 break
@@ -59,6 +61,7 @@ class ExtractFramesProcessor(BaseProcessor):
                 cv2.imwrite(str(filepath), frame)
                 output_files.append(filename)
                 saved += 1
+                context.report_progress(saved, max_frames)
 
             frame_idx += 1
 

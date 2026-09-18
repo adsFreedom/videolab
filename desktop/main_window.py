@@ -11,6 +11,8 @@ from PySide6.QtGui import QAction
 
 from core.logger import logger
 from core.project_manager import ProjectManager
+from core.processor_registry import ProcessorRegistry
+from core.utils import load_yaml
 from desktop.panels import TreePanel, SettingsPanel, FilesPanel, LogPanel
 from desktop.styles import DARK_THEME
 
@@ -32,7 +34,6 @@ class MainWindow(QMainWindow):
         self._create_central_widget()
         self._create_status_bar()
 
-        # Подписываемся на глобальный логгер ДО любых сообщений
         logger.subscribe(self._on_global_log)
 
         self.log("INFO", "VideoLab запущен. Откройте или создайте проект.")
@@ -105,6 +106,7 @@ class MainWindow(QMainWindow):
         self.files_panel.file_double_clicked.connect(self._on_file_double_clicked)
         self.files_panel.node_double_clicked.connect(self._on_node_double_clicked)
         self.settings_panel.node_updated.connect(self._on_node_updated)
+        self.settings_panel.run_requested.connect(self._on_run_requested)
 
         self.main_splitter.addWidget(self.tree_panel)
         self.main_splitter.addWidget(self.settings_panel)
@@ -128,12 +130,10 @@ class MainWindow(QMainWindow):
     # ==================== API ====================
 
     def log(self, level: str, message: str) -> None:
-        """Логирует сообщение в панель лога."""
         self.log_panel.add_log(level, message)
         self._update_log_tab_indicator()
 
     def _on_global_log(self, level: str, message: str) -> None:
-        """Callback из глобального логгера."""
         self.log(level, message)
 
     def set_status(self, text: str) -> None:
@@ -152,7 +152,6 @@ class MainWindow(QMainWindow):
         self.log("SUCCESS", f"Проект открыт: {project.project_root}")
 
     def clear_project(self) -> None:
-        """Закрывает текущий проект."""
         self.project = None
         self.project_label.setText("Проект: (не открыт)")
         self.setWindowTitle("VideoLab")
@@ -196,6 +195,18 @@ class MainWindow(QMainWindow):
         self.tree_panel.refresh()
         self.files_panel.load_path(node_path)
         self.settings_panel.load_node(node_path)
+
+    def _on_run_requested(self, node_path: str) -> None:
+        """Запускает обработку с прогрессом по запросу из SettingsPanel."""
+        node_data = load_yaml(Path(node_path) / f"{Path(node_path).name}.yaml")
+        processor_name = node_data.get("processor", "")
+        try:
+            processor_class = ProcessorRegistry.get(processor_name)
+        except KeyError:
+            self.log("ERROR", f"Обработчик '{processor_name}' не зарегистрирован")
+            return
+
+        self.tree_panel._run_with_progress(node_path, processor_class)
 
     def _on_file_double_clicked(self, file_path: str) -> None:
         name = Path(file_path).name
@@ -300,7 +311,6 @@ class MainWindow(QMainWindow):
         else:
             self.settings.remove("last_project_path")
 
-        # Отписываемся от логгера
         logger.unsubscribe(self._on_global_log)
 
         super().closeEvent(event)

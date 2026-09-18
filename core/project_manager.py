@@ -2,10 +2,12 @@
 import os
 import shutil
 import fnmatch
+import time
 from pathlib import Path
 from typing import Any
 
 from core.base_processor import BaseProcessor
+from core.execution import ExecutionContext, CancelledError
 from core.processor_registry import ProcessorRegistry
 from core.utils import (
     PROJECT_MARKER,
@@ -169,7 +171,6 @@ class ProjectManager:
         yaml_file = source_node_path / f"{source_node_path.name}.yaml"
         data = load_yaml(yaml_file)
         data["input_file"] = str(target)
-        # При добавлении/замене видео обновляем время — дети увидят изменение
         data["last_run_at"] = timestamp()
         save_yaml(yaml_file, data)
 
@@ -233,10 +234,7 @@ class ProjectManager:
         return processor_class()
 
     def _get_parent_run_at(self, node_path: Path) -> str | None:
-        """
-        Возвращает last_run_at родительского узла.
-        Если родитель — не узел, возвращает None.
-        """
+        """Возвращает last_run_at родительского узла (или None)."""
         parent_path = node_path.parent
         parent_yaml = parent_path / f"{parent_path.name}.yaml"
 
@@ -246,25 +244,38 @@ class ProjectManager:
         parent_data = load_yaml(parent_yaml)
         return parent_data.get("last_run_at")
 
-    def run_node(self, node_path: str) -> dict:
+    def run_node(self, node_path: str, context: ExecutionContext | None = None) -> dict:
         """
-        Запускает обработку для узла.
-        После УСПЕШНОЙ обработки сохраняет:
-        - settings_snapshot и input_files_snapshot
-        - last_run_at (время обработки)
+        Запускает обработку узла.
+
+        Если context=None — создаётся пустой (без прогресса и отмены).
+        Если обработка отменена — возвращает {"cancelled": True}, snapshot НЕ пишется.
         """
+        if context is None:
+            context = ExecutionContext()
+
         node_path_obj = Path(node_path)
         node_data = self.get_node_info(node_path)
         processor = self.get_node_processor(node_path)
 
-        # Если упадёт — snapshot и метка НЕ сохранятся
-        result = processor.run(
-            input_files=node_data.get("input_files", {}),
-            settings=node_data.get("settings", {}),
-            output_dir=node_path,
-        )
+        start_time = time.time()
 
-        # --- Успешная обработка: обновляем YAML ---
+        try:
+            result = processor.run(
+                input_files=node_data.get("input_files", {}),
+                settings=node_data.get("settings", {}),
+                output_dir=node_path,
+                context=context,
+            )
+        except CancelledError:
+            duration = time.time() - start_time
+            return {
+                "cancelled": True,
+                "duration_seconds": round(duration, 3),
+            }
+
+        duration = time.time() - start_time
+
         yaml_file = node_path_obj / f"{node_path_obj.name}.yaml"
 
         if result.get("output_files"):
@@ -273,6 +284,7 @@ class ProjectManager:
         node_data["settings_snapshot"] = dict(node_data.get("settings", {}))
         node_data["input_files_snapshot"] = dict(node_data.get("input_files", {}))
         node_data["last_run_at"] = timestamp()
+        node_data["last_duration_seconds"] = round(duration, 3)
 
         save_yaml(yaml_file, node_data)
 

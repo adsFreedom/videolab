@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QLineEdit, QFormLayout, QComboBox, QDialogButtonBox,
     QGroupBox, QMessageBox, QScrollArea, QWidget, QSplitter,
-    QAbstractItemView, QPushButton,
+    QAbstractItemView,
 )
 from PySide6.QtCore import Qt
 
@@ -20,7 +20,6 @@ class ProcessorChooserDialog(QDialog):
     Возвращает: processor_name, input_files, settings и выбор действия.
     """
 
-    # Действия
     ACTION_ADD_ONLY = "add_only"
     ACTION_ADD_AND_RUN = "add_and_run"
 
@@ -38,7 +37,6 @@ class ProcessorChooserDialog(QDialog):
         self.processors = processors
         self.selected_processor_class: type[BaseProcessor] | None = None
 
-        # Результат
         self.result_processor_name: str = ""
         self.result_input_files: dict[str, str] = {}
         self.result_settings: dict = {}
@@ -55,7 +53,6 @@ class ProcessorChooserDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
-        # --- Сплиттер ---
         splitter = QSplitter(Qt.Horizontal)
 
         # ЛЕВАЯ ЧАСТЬ
@@ -119,7 +116,6 @@ class ProcessorChooserDialog(QDialog):
         self.btn_add.setEnabled(False)
         self.btn_add_run.setEnabled(False)
 
-        # "Добавить" — кнопка по умолчанию (Enter)
         self.btn_add.setDefault(True)
         self.btn_add.setAutoDefault(True)
         self.btn_add_run.setAutoDefault(False)
@@ -133,7 +129,6 @@ class ProcessorChooserDialog(QDialog):
         layout.addWidget(buttons)
 
     def _populate_list(self) -> None:
-        """Заполняет список обработчиков, группируя по категориям."""
         self.list_widget.clear()
 
         by_category: dict[str, list[type[BaseProcessor]]] = {}
@@ -195,7 +190,6 @@ class ProcessorChooserDialog(QDialog):
             f"{processor_class.icon}  {processor_class.display_name}"
         )
 
-        # --- Входные файлы ---
         self.input_combos: dict[str, QComboBox] = {}
         if processor_class.input_spec:
             inputs_group = QGroupBox("Входные файлы")
@@ -221,7 +215,6 @@ class ProcessorChooserDialog(QDialog):
 
             self.right_container_layout.addWidget(inputs_group)
 
-        # --- Настройки ---
         if processor_class.settings_schema:
             settings_group = QGroupBox("Настройки")
             settings_layout = QVBoxLayout(settings_group)
@@ -236,7 +229,6 @@ class ProcessorChooserDialog(QDialog):
         self._update_buttons()
 
     def _update_buttons(self) -> None:
-        """Активирует кнопки, если все required inputs выбраны."""
         enabled = self._is_ready_to_add()
         self.btn_add.setEnabled(enabled)
         self.btn_add_run.setEnabled(enabled)
@@ -258,7 +250,6 @@ class ProcessorChooserDialog(QDialog):
         return True
 
     def _collect_data(self) -> bool:
-        """Собирает данные. Возвращает True, если всё ок."""
         if not self.selected_processor_class:
             return False
 
@@ -295,7 +286,6 @@ class ProcessorChooserDialog(QDialog):
         return True
 
     def _on_accept(self, action: str) -> None:
-        """Собирает данные и закрывает диалог с выбранным действием."""
         if not self._collect_data():
             return
         self.result_action = action

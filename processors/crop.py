@@ -3,6 +3,7 @@ from pathlib import Path
 import cv2
 
 from core.base_processor import BaseProcessor
+from core.execution import ExecutionContext
 from core.processor_registry import ProcessorRegistry
 
 
@@ -33,7 +34,7 @@ class CropProcessor(BaseProcessor):
         },
     }
 
-    def run(self, input_files, settings, output_dir):
+    def run(self, input_files, settings, output_dir, context: ExecutionContext):
         video_path = input_files["video"]
         start_frame = settings.get("start_frame", 0)
         end_frame = settings.get("end_frame", -1)
@@ -59,15 +60,21 @@ class CropProcessor(BaseProcessor):
         if not writer.isOpened():
             raise RuntimeError(f"Не удалось создать видео: {output_path}")
 
+        frames_to_process = end_frame - start_frame
         frame_idx = start_frame
         written = 0
+
         while frame_idx < end_frame:
+            context.check_cancel()
             ret, frame = cap.read()
             if not ret:
                 break
             writer.write(frame)
             frame_idx += 1
             written += 1
+
+            if written % 10 == 0 or written == frames_to_process:
+                context.report_progress(written, frames_to_process)
 
         cap.release()
         writer.release()
