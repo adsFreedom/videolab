@@ -10,10 +10,11 @@ from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QAction
 
 from core.logger import logger
-from core.project_manager import ProjectManager
+from core.project import ProjectManager
 from core.processor_registry import ProcessorRegistry
 from core.utils import load_yaml
-from desktop.panels import TreePanel, SettingsPanel, FilesPanel, LogPanel
+from desktop.tree import TreePanel
+from desktop.panels import SettingsPanel, FilesPanel, LogPanel
 from desktop.styles import DARK_THEME
 
 

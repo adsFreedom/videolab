@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import pytest
 
-from core.project_manager import ProjectManager
+from core.project import ProjectManager
 from core.processor_registry import ProcessorRegistry
 from processors import crop, extract_frames  # Регистрирует обработчики
 

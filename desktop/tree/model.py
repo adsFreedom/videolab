@@ -5,7 +5,7 @@ from typing import Any
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtCore import Qt
 
-from core.project_manager import ProjectManager
+from core.project import ProjectManager
 
 
 PROCESSOR_ICONS = {
@@ -30,7 +30,6 @@ class TreeModel(QStandardItemModel):
         self.project: ProjectManager | None = None
 
     def load_project(self, project: ProjectManager) -> None:
-        """Загружает дерево проекта."""
         self.project = project
         self.clear()
         self.setHorizontalHeaderLabels(["Узел"])
@@ -47,7 +46,6 @@ class TreeModel(QStandardItemModel):
         node_data: dict[str, Any],
         validation: dict[str, tuple[bool, str]],
     ) -> QStandardItem:
-        """Создает QStandardItem из данных узла."""
         item = QStandardItem()
 
         name = node_data["name"]
@@ -75,7 +73,6 @@ class TreeModel(QStandardItemModel):
         return item
 
     def get_path(self, index) -> str:
-        """Возвращает путь к узлу по QModelIndex."""
         if not index.isValid():
             return ""
         item = self.itemFromIndex(index)

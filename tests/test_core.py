@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from core.project_manager import ProjectManager
+from core.project import ProjectManager
 from core.processor_registry import ProcessorRegistry
 from core.base_processor import BaseProcessor
 

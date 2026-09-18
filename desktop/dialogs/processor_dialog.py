@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from core.base_processor import BaseProcessor
-from core.project_manager import ProjectManager
+from core.project import ProjectManager
 from desktop.widgets.schema_form import SchemaForm
 
 
