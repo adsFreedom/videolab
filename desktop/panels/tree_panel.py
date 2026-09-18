@@ -277,37 +277,62 @@ class TreePanel(QWidget):
             self._show_error_dialog("Ошибка обработки", error_msg)
 
     def _run_with_progress(self, node_path: str, processor_class: type) -> None:
-        """Запускает обработку с модальным прогресс-диалогом."""
+        """Запускает обработку в отдельном потоке с polling-диалогом."""
         from desktop.dialogs.progress_dialog import ProgressDialog
         from core.execution import ExecutionContext
+        from core.worker import ProcessingWorker, ProcessingThread
 
         node_name = Path(node_path).name
         title = f"{processor_class.icon} {processor_class.display_name}"
 
         context = ExecutionContext()
+        worker = ProcessingWorker(self.project, node_path, context)
+        thread = ProcessingThread(worker)
         dialog = ProgressDialog(node_name, title, context, parent=self)
-        dialog.show()
 
-        QApplication.processEvents()
+        # Ссылки, чтобы не собрал GC
+        self._current_thread = thread
+        self._current_worker = worker
+        self._current_dialog = dialog
+        self._current_context = context
 
-        try:
-            result = self.project.run_node(node_path, context=context)
-            dialog.accept()
+        def cleanup():
+            self._current_thread = None
+            self._current_worker = None
+            self._current_dialog = None
+            self._current_context = None
 
-            if result.get("cancelled"):
+        def on_dialog_finished():
+            """Диалог закрылся (обработка завершена)."""
+            # Дожидаемся завершения потока
+            thread.quit()
+            thread.wait(2000)
+
+            # Анализируем результат из контекста
+            if context.cancelled:
                 log("WARNING", f"Обработка отменена: {node_path}")
                 QMessageBox.information(
                     self, "Отменено",
                     "Обработка была отменена пользователем."
                 )
+            elif context.error:
+                error_msg = f"Ошибка обработки '{node_name}': {context.error}"
+                tb = context.traceback or ""
+                log("ERROR", f"{error_msg}\n\n{tb}")
+                self._show_error_dialog(
+                    "Ошибка обработки",
+                    f"{context.error}\n\n{tb}",
+                )
             else:
-                self.refresh()
                 log("SUCCESS", f"Узел обработан: {node_path}")
-        except Exception as e:
-            dialog.accept()
-            error_msg = f"Ошибка обработки '{node_name}': {e}"
-            log("ERROR", error_msg, exc_info=True)
-            self._show_error_dialog("Ошибка обработки", error_msg)
+
+            self.refresh()
+            cleanup()
+
+        dialog.finished_external.connect(on_dialog_finished)
+
+        thread.start()
+        dialog.show()
 
     def _show_error_dialog(self, title: str, message: str) -> None:
         dialog = QDialog(self)
