@@ -402,7 +402,15 @@ class TreePanel(QWidget):
 
         try:
             self.project.delete_node(node_path)
-            self.refresh()
+            # Сбрасываем выделение — очищаем панель
+            self.tree_view.clearSelection()
+            self.model.clear()
+            self.model.setHorizontalHeaderLabels(["Узел"])
+            if self.project:
+                self.model.load_project(self.project)
+                self.tree_view.expandAll()
+            self.node_selected.emit("")   # ← очищает SettingsPanel и FilesPanel
+            self.tree_changed.emit()
             log("INFO", f"Узел удален: {node_path}")
         except Exception as e:
             log("ERROR", f"Ошибка удаления узла: {e}", exc_info=True)

@@ -185,6 +185,11 @@ class MainWindow(QMainWindow):
             self.main_tabs.tabBar().setTabTextColor(log_tab_index, Qt.white)
 
     def _on_node_selected(self, node_path: str) -> None:
+        if not node_path:
+            # Пустое выделение — очищаем панели
+            self.files_panel.clear()
+            self.settings_panel.clear()
+            return
         self.files_panel.load_path(node_path)
         if self.project:
             self.settings_panel.set_project(self.project)
