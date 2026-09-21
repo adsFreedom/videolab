@@ -19,7 +19,6 @@ PROCESSOR_ICONS = {
     "fft": "📊",
 }
 
-# Роли
 ROLE_PATH = Qt.UserRole + 1
 ROLE_VALID = Qt.UserRole + 2
 ROLE_STATE = Qt.UserRole + 3
@@ -53,7 +52,6 @@ class TreeModel(QStandardItemModel):
         node_data: dict[str, Any],
         validation: dict[str, tuple[bool, str]],
     ) -> QStandardItem:
-        """Создает QStandardItem с детьми."""
         name = node_data["name"]
         display_name = node_data.get("display_name", name)
         path = node_data["path"]
@@ -74,14 +72,48 @@ class TreeModel(QStandardItemModel):
 
         return item
 
-    # ==================== ОБНОВЛЕНИЕ ОДНОГО УЗЛА ====================
+    # ==================== ОБНОВЛЕНИЕ УЗЛА ====================
 
     def update_node_state(self, node_path: str) -> bool:
         """Обновляет только указанный узел. Возвращает True, если найден."""
         item = self._find_item_by_path(node_path)
         if item is None:
             return False
+        self._update_item(item, node_path)
+        return True
 
+    def update_node_and_descendants(self, node_path: str) -> bool:
+        """
+        Обновляет узел И ВСЕХ его потомков.
+        Используется после обработки — дети каскадно краснеют.
+        """
+        item = self._find_item_by_path(node_path)
+        if item is None:
+            return False
+
+        # Обновляем сам узел
+        self._update_item(item, node_path)
+
+        # Рекурсивно — всех потомков
+        self._update_descendants(item)
+
+        return True
+
+    # ==================== ВНУТРЕННИЕ ====================
+
+    def _update_descendants(self, parent_item: QStandardItem) -> None:
+        """Рекурсивно обновляет всех потомков."""
+        for row in range(parent_item.rowCount()):
+            child = parent_item.child(row, 0)
+            if child is None:
+                continue
+            child_path = child.data(ROLE_PATH)
+            if child_path:
+                self._update_item(child, child_path)
+            self._update_descendants(child)
+
+    def _update_item(self, item: QStandardItem, node_path: str) -> None:
+        """Обновляет один QStandardItem по данным из YAML."""
         node_path_obj = Path(node_path)
         yaml_path = node_path_obj / f"{node_path_obj.name}.yaml"
         node_data = load_yaml(yaml_path)
@@ -100,10 +132,6 @@ class TreeModel(QStandardItemModel):
         self._apply_item(item, name, display_name, node_path,
                          processor_type, is_valid, state)
 
-        return True
-
-    # ==================== ВНУТРЕННИЕ ====================
-
     def _compute_state(self, is_processing: bool, is_valid: bool) -> str:
         if is_processing:
             return "processing"
@@ -121,7 +149,6 @@ class TreeModel(QStandardItemModel):
         is_valid: bool,
         state: str,
     ) -> None:
-        """Заполняет item данными."""
         type_icon = PROCESSOR_ICONS.get(processor_type, "📁")
 
         if state == "processing":

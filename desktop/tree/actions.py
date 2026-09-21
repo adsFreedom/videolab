@@ -86,7 +86,6 @@ class TreeActions:
             if action == ProcessorChooserDialog.ACTION_ADD_AND_RUN:
                 self.run_with_progress(new_node_path, processor_class)
             else:
-                # Новый узел — здесь нужна перезагрузка модели (структура изменилась)
                 log("SUCCESS", f"Обработчик создан (без обработки): {new_node_path}")
                 self.panel.refresh()
         except Exception as e:
@@ -97,20 +96,17 @@ class TreeActions:
     # ==================== ЗАПУСК ОБРАБОТКИ ====================
 
     def run_with_progress(self, node_path: str, processor_class: type) -> None:
-        """Запускает обработку в отдельном потоке. Прогресс — в дереве."""
         node_name = Path(node_path).name
 
         context = ExecutionContext(node_path=node_path)
         progress_registry.set(node_path, 0, 0)
 
-        # Точечное обновление: только этот узел станет ⏳
-        # Если узла ещё нет в модели (только что создан) — нужна полная перезагрузка
+        # Точечное обновление только этого узла (⏳)
         if not self.panel.model.update_node_state(node_path):
             self.panel.refresh()
 
         self.panel.start_progress_updates()
 
-        # Блокируем кнопку "Применить"
         try:
             self.panel.main_window_ref.settings_panel.processor_tab.set_processing_state(True)
         except AttributeError:
@@ -138,9 +134,9 @@ class TreeActions:
             progress_registry.clear(node_path)
             self.panel.stop_progress_updates()
 
-            # 2. Точечное обновление узла — стал ✅ / ❌
-            # Если узла нет в модели (новый создан) — полный refresh
-            if not self.panel.model.update_node_state(node_path):
+            # 2. Обновляем узел И ВСЕХ его потомков
+            #    (после обработки родителя дети каскадно краснеют)
+            if not self.panel.model.update_node_and_descendants(node_path):
                 self.panel.refresh()
 
             # 3. Сообщения
@@ -228,7 +224,6 @@ class TreeActions:
 
         try:
             project.delete_node(node_path)
-            # Удаление — структура изменилась, нужен полный refresh
             self.panel.tree_view.clearSelection()
             self.panel.refresh()
             self.panel.node_selected.emit("")
