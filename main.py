@@ -1,19 +1,20 @@
 """Точка входа VideoLab."""
 import sys
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QStyleFactory
 
 # Регистрация обработчиков
 from processors import crop, extract_frames  # noqa: F401
 
-from desktop.main_window import MainWindow
+from desktop.window import MainWindow
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("VideoLab")
     app.setOrganizationName("VideoLab")
+
+    app.setStyle(QStyleFactory.create("Fusion"))
 
     window = MainWindow()
     window.show()

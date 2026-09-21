@@ -14,7 +14,7 @@ from core.project import ProjectManager
 class SourceTab(QWidget):
     """Вкладка настроек для source_0."""
 
-    node_updated = Signal(str)  # путь к узлу, который изменился
+    node_updated = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -40,10 +40,13 @@ class SourceTab(QWidget):
         self.project = project
 
     def load_node(self, node_path: str, node_data: dict) -> None:
-        """Загружает узел source в форму."""
         self.current_node_path = node_path
         current = node_data.get("input_file") or "(видео не выбрано)"
         self.info_label.setText(f"<b>Текущий файл:</b><br>{current}")
+
+    def clear(self) -> None:
+        self.current_node_path = ""
+        self.info_label.setText("(файл не выбран)")
 
     def _on_select_video(self) -> None:
         if not self.project or not self.current_node_path:
