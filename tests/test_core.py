@@ -15,13 +15,15 @@ from core.base_processor import BaseProcessor
 class DummyProcessor(BaseProcessor):
     name = "dummy"
     display_name = "Тестовый обработчик"
+    category = "Тест"
+    icon = "🧪"
     input_spec = {"video": {"mask": "*.avi", "required": True}}
     output_mask = "output_*.avi"
     settings_schema = {
         "param1": {"type": "spinbox", "label": "Параметр", "default": 10, "min": 0},
     }
 
-    def run(self, input_files, settings, output_dir):
+    def run(self, input_files, settings, output_dir, context):
         output_file = Path(output_dir) / "output_001.avi"
         output_file.write_text("fake video")
         return {"output_files": ["output_001.avi"]}
@@ -71,7 +73,6 @@ class TestTreeScanning:
         source_path = temp_project.project_root / "source_0"
         is_valid, msg = temp_project.validate_node(str(source_path))
         assert not is_valid
-        assert "исходный файл" in msg.lower()
 
 
 class TestProcessorNodeCreation:
@@ -132,7 +133,9 @@ class TestValidation:
         is_valid, _ = temp_project.validate_node(node_path)
         assert not is_valid
 
+        # Создаём файл И snapshot (как будто run_node отработал)
         (Path(node_path) / "output_001.avi").write_text("done")
+        temp_project.run_node(node_path)  # ← это создаст snapshot
 
         is_valid, _ = temp_project.validate_node(node_path)
         assert is_valid

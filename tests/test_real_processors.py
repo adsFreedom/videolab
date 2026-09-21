@@ -7,10 +7,34 @@ import cv2
 import numpy as np
 import pytest
 
-from core.project import ProjectManager
 from core.processor_registry import ProcessorRegistry
-from processors import crop, extract_frames  # Регистрирует обработчики
 
+
+# ==================== ФИКСТУРА: ПЕРЕРЕГИСТРАЦИЯ ОБРАБОТЧИКОВ ====================
+
+@pytest.fixture(autouse=True)
+def fresh_registry():
+    """Очищает реестр и регистрирует нужные обработчики."""
+    ProcessorRegistry.clear()
+
+    from processors.crop import CropProcessor
+    from processors.extract_frames import ExtractFramesProcessor
+
+    try:
+        ProcessorRegistry.register(CropProcessor)
+    except ValueError:
+        pass
+
+    try:
+        ProcessorRegistry.register(ExtractFramesProcessor)
+    except ValueError:
+        pass
+
+    yield
+    ProcessorRegistry.clear()
+
+
+# ==================== ФИКСТУРА: ТЕСТОВОЕ ВИДЕО ====================
 
 @pytest.fixture
 def sample_video():
@@ -30,14 +54,20 @@ def sample_video():
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+# ==================== ТЕСТЫ ====================
+
 class TestCropProcessor:
     def test_crop_video(self, sample_video, tmp_path):
+        from core.execution import ExecutionContext
+
         processor = ProcessorRegistry.get("crop")()
+        context = ExecutionContext()
 
         result = processor.run(
             input_files={"video": str(sample_video)},
             settings={"start_frame": 5, "end_frame": 15},
             output_dir=str(tmp_path),
+            context=context,
         )
 
         assert "output_files" in result
@@ -46,7 +76,6 @@ class TestCropProcessor:
         output_file = tmp_path / result["output_files"][0]
         assert output_file.exists()
 
-        # Проверяем, что в выходном видео 10 кадров
         cap = cv2.VideoCapture(str(output_file))
         assert int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) == 10
         cap.release()
@@ -56,12 +85,16 @@ class TestCropProcessor:
 
 class TestExtractFramesProcessor:
     def test_extract_frames(self, sample_video, tmp_path):
+        from core.execution import ExecutionContext
+
         processor = ProcessorRegistry.get("extract_frames")()
+        context = ExecutionContext()
 
         result = processor.run(
             input_files={"video": str(sample_video)},
             settings={"step": 5, "max_frames": 10},
             output_dir=str(tmp_path),
+            context=context,
         )
 
         # 30 кадров / шаг 5 = 6 кадров
