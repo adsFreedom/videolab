@@ -157,6 +157,34 @@ QProgressBar {
 QProgressBar::chunk {
     background-color: #0e639c;
 }
+
+QMenu {
+    background-color: #2d2d30;
+    color: #d4d4d4;
+    border: 1px solid #3e3e42;
+    padding: 4px 0px;
+}
+
+QMenu::item {
+    background-color: transparent;
+    padding: 6px 24px 6px 24px;
+    border: none;
+}
+
+QMenu::item:selected {
+    background-color: #094771;
+    color: #ffffff;
+}
+
+QMenu::item:disabled {
+    color: #666666;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: #3e3e42;
+    margin: 4px 8px;
+}
 """
 
 
