@@ -5,10 +5,12 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeView, QLabel,
     QPushButton, QStyle, QApplication,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 
 from core.project import ProjectManager
+from core.progress_registry import progress_registry
 from desktop.tree.model import TreeModel, ROLE_PATH
+from desktop.tree.delegate import TreeDelegate
 from desktop.tree.actions import TreeActions
 from desktop.tree import context_menu
 
@@ -19,16 +21,15 @@ class TreePanel(QWidget):
     node_selected = Signal(str)
     tree_changed = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, main_window, parent=None):
         super().__init__(parent)
 
+        self.main_window_ref = main_window
         self.project: ProjectManager | None = None
         self.actions = TreeActions(self)
 
-        # Ссылки для активных потоков (используются в actions)
         self._current_thread = None
         self._current_worker = None
-        self._current_dialog = None
         self._current_context = None
 
         layout = QVBoxLayout(self)
@@ -39,7 +40,6 @@ class TreePanel(QWidget):
         header.setStyleSheet("font-weight: bold; padding: 4px;")
         layout.addWidget(header)
 
-        # --- Кнопки управления ---
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(4)
 
@@ -69,7 +69,6 @@ class TreePanel(QWidget):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
-        # --- Дерево ---
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -86,12 +85,27 @@ class TreePanel(QWidget):
         self.model = TreeModel(self)
         self.tree_view.setModel(self.model)
 
+        self.delegate = TreeDelegate(self.tree_view)
+        self.tree_view.setItemDelegate(self.delegate)
+
+        self._configure_columns()
+
         self.tree_view.customContextMenuRequested.connect(self._on_context_menu)
         self.tree_view.selectionModel().selectionChanged.connect(
             self._on_selection_changed
         )
 
         layout.addWidget(self.tree_view)
+
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(100)
+        self._progress_timer.timeout.connect(self._refresh_progress_view)
+
+    def _configure_columns(self) -> None:
+        header = self.tree_view.header()
+        header.setSectionResizeMode(0, header.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, header.ResizeMode.Fixed)
+        self.tree_view.setColumnWidth(1, 120)
 
     # ==================== API ====================
 
@@ -114,8 +128,25 @@ class TreePanel(QWidget):
         index = self.tree_view.currentIndex()
         if not index.isValid():
             return ""
+        index = self.model.index(index.row(), 0, index.parent())
         item = self.model.itemFromIndex(index)
+        if not item:
+            return ""
         return item.data(ROLE_PATH) or ""
+
+    def _refresh_progress_view(self) -> None:
+        if not progress_registry.has_active():
+            self._progress_timer.stop()
+            self.tree_view.viewport().update()
+            return
+        self.tree_view.viewport().update()
+
+    def start_progress_updates(self) -> None:
+        if not self._progress_timer.isActive():
+            self._progress_timer.start()
+
+    def stop_progress_updates(self) -> None:
+        self._progress_timer.stop()
 
     # ==================== ВНУТРЕННИЕ ====================
 
@@ -147,7 +178,11 @@ class TreePanel(QWidget):
         if not indexes:
             return
         index = indexes[0]
+        if index.column() != 0:
+            index = self.model.index(index.row(), 0, index.parent())
         item = self.model.itemFromIndex(index)
+        if not item:
+            return
         path = item.data(ROLE_PATH) or ""
         if path:
             self.node_selected.emit(path)

@@ -30,7 +30,6 @@ class ProcessorTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # --- Область формы ---
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.NoFrame)
@@ -42,7 +41,6 @@ class ProcessorTab(QWidget):
 
         layout.addWidget(self.scroll, stretch=1)
 
-        # --- Кнопки ---
         btn_layout = QHBoxLayout()
 
         self.btn_save = QPushButton("Сохранить")
@@ -59,8 +57,11 @@ class ProcessorTab(QWidget):
     def set_project(self, project: ProjectManager) -> None:
         self.project = project
 
+    def set_processing_state(self, is_processing: bool) -> None:
+        """Блокирует кнопку 'Применить' на время обработки."""
+        self.btn_apply.setEnabled(not is_processing)
+
     def load_node(self, node_path: str, node_data: dict) -> None:
-        """Загружает форму для обработчика."""
         self.current_node_path = node_path
         self._clear_form()
         self.schema_form = None
@@ -77,13 +78,11 @@ class ProcessorTab(QWidget):
             self.btn_apply.setEnabled(False)
             return
 
-        # Определяем, что показать: settings или defaults
         settings_to_show = node_data.get("settings", {})
         has_snapshot = "settings_snapshot" in node_data
         if not has_snapshot:
             settings_to_show = processor_class().get_default_settings()
 
-        # Строим форму
         if processor_class.settings_schema:
             self.schema_form = SchemaForm(processor_class.settings_schema)
             self.schema_form.set_values(settings_to_show)

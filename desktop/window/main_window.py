@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QSplitter, QLabel,
     QMessageBox,
 )
+from PySide6.QtGui import QKeySequence, QShortcut
 
 from core.logger import logger
 from core.project import ProjectManager
@@ -31,22 +32,21 @@ class MainWindow(QMainWindow):
         self.resize(1400, 900)
         self.setStyleSheet(DARK_THEME)
 
-        # Подкомпоненты (создаются после panels/log_panel)
         self._create_central_widget()
 
-        # Теперь, когда есть log_panel, создаём остальное
         self.project_actions = ProjectActions(self)
         self.state = WindowState(self)
 
-        # Тулбар
         self.toolbar = MainToolbar(self)
         self.addToolBar(self.toolbar)
 
-        # Статус-бар
         self._create_status_bar()
 
-        # Подписка на логгер
         logger.subscribe(self._on_global_log)
+
+        # Esc — отмена активной обработки
+        self._esc_shortcut = QShortcut(QKeySequence("Esc"), self)
+        self._esc_shortcut.activated.connect(self._on_escape)
 
         self.log("INFO", "VideoLab запущен. Откройте или создайте проект.")
         self.state.restore()
@@ -56,11 +56,9 @@ class MainWindow(QMainWindow):
     def _create_central_widget(self) -> None:
         self.tabs = MainTabs(self)
 
-        # Таб 1: Проект
         self.project_tab = self._create_project_tab()
         self.tabs.addTab(self.project_tab, "Проект")
 
-        # Таб 2: Лог
         self.log_panel = LogPanel()
         self.tabs.addTab(self.log_panel, "Лог")
 
@@ -73,7 +71,7 @@ class MainWindow(QMainWindow):
 
         self.main_splitter = QSplitter()
 
-        self.tree_panel = TreePanel()
+        self.tree_panel = TreePanel(self)
         self.settings_panel = SettingsPanel()
         self.files_panel = FilesPanel()
 
@@ -133,7 +131,7 @@ class MainWindow(QMainWindow):
 
         if hasattr(self.tree_panel, "model"):
             self.tree_panel.model.clear()
-            self.tree_panel.model.setHorizontalHeaderLabels(["Узел"])
+            self.tree_panel.model.setHorizontalHeaderLabels(["Узел", "Состояние"])
 
         self.files_panel.clear()
         self.settings_panel.clear()
@@ -151,7 +149,6 @@ class MainWindow(QMainWindow):
         if self.project:
             self.settings_panel.set_project(self.project)
         self.settings_panel.load_node(node_path)
-        self.log("INFO", f"Выбран узел: {node_path}")
 
     def _on_node_updated(self, node_path: str) -> None:
         self.tree_panel.refresh()
@@ -159,7 +156,6 @@ class MainWindow(QMainWindow):
         self.settings_panel.load_node(node_path)
 
     def _on_run_requested(self, node_path: str) -> None:
-        """Запускает обработку с прогрессом по запросу из SettingsPanel."""
         node_data = load_yaml(Path(node_path) / f"{Path(node_path).name}.yaml")
         processor_name = node_data.get("processor", "")
         try:
@@ -181,9 +177,11 @@ class MainWindow(QMainWindow):
     def _on_node_double_clicked(self, node_path: str) -> None:
         self.files_panel.load_path(node_path)
         self.settings_panel.load_node(node_path)
-        self.log("INFO", f"Переход в узел: {node_path}")
 
-    # ==================== ДЕЙСТВИЯ ТУЛБАРА ====================
+    def _on_escape(self) -> None:
+        """Esc — отмена активной обработки."""
+        if self.tree_panel._current_context is not None:
+            self.tree_panel.actions.cancel_processing()
 
     def on_record_video(self) -> None:
         QMessageBox.information(
@@ -202,6 +200,21 @@ class MainWindow(QMainWindow):
     # ==================== ЗАКРЫТИЕ ====================
 
     def closeEvent(self, event) -> None:
+        if self.tree_panel._current_context is not None:
+            reply = QMessageBox.question(
+                self, "Обработка выполняется",
+                "Идёт обработка узла. Отменить её и закрыть приложение?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            self.tree_panel.actions.cancel_processing()
+            thread = self.tree_panel._current_thread
+            if thread:
+                thread.quit()
+                thread.wait(3000)
+
         self.state.save()
         logger.unsubscribe(self._on_global_log)
         super().closeEvent(event)

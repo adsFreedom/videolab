@@ -4,29 +4,27 @@ import subprocess
 import sys
 
 from PySide6.QtWidgets import QMessageBox
-from PySide6.QtCore import Qt
 
 from core.logger import log
 from core.project import ProjectManager
 from core.processors import ProcessorRegistry
 from core.utils import load_yaml
-from desktop.dialogs.processor_chooser import ProcessorChooserDialog
-from desktop.dialogs.progress import ProgressDialog
-from desktop.dialogs.error import ErrorDialog, show_current_exception
 from core.execution import ExecutionContext
+from core.progress_registry import progress_registry
 from core.worker import ProcessingWorker, ProcessingThread
+from desktop.dialogs.processor_chooser import ProcessorChooserDialog
+from desktop.dialogs.error import ErrorDialog, show_current_exception
 
 
 class TreeActions:
-    """Набор действий над узлами. Не UI — только логика."""
+    """Набор действий над узлами."""
 
     def __init__(self, panel):
-        self.panel = panel  # ссылка на TreePanel
+        self.panel = panel
 
     # ==================== ПЕРЕСЧЁТ ====================
 
     def rescan_node(self, node_path: str) -> None:
-        """Пересчитывает узел с текущими настройками."""
         project = self.panel.project
         if not project:
             return
@@ -42,10 +40,9 @@ class TreeActions:
         log("INFO", f"Пересчёт узла: {node_path}")
         self.run_with_progress(node_path, processor_class)
 
-    # ==================== ДОБАВЛЕНИЕ ОБРАБОТЧИКА ====================
+    # ==================== ДОБАВЛЕНИЕ ====================
 
     def add_processor(self, node_path: str) -> None:
-        """Открывает диалог добавления обработчика и создает узел."""
         project = self.panel.project
         if not project:
             return
@@ -88,18 +85,10 @@ class TreeActions:
 
             if action == ProcessorChooserDialog.ACTION_ADD_AND_RUN:
                 self.run_with_progress(new_node_path, processor_class)
-                QMessageBox.information(
-                    self.panel, "Готово",
-                    f"Обработчик создан:\n{new_node_path}"
-                )
             else:
+                # Новый узел — здесь нужна перезагрузка модели (структура изменилась)
                 log("SUCCESS", f"Обработчик создан (без обработки): {new_node_path}")
                 self.panel.refresh()
-                QMessageBox.information(
-                    self.panel, "Готово",
-                    f"Обработчик создан:\n{new_node_path}\n\n"
-                    f"Не забудьте запустить обработку."
-                )
         except Exception as e:
             error_msg = f"Ошибка обработчика '{processor_name}': {e}"
             log("ERROR", error_msg, exc_info=True)
@@ -108,31 +97,53 @@ class TreeActions:
     # ==================== ЗАПУСК ОБРАБОТКИ ====================
 
     def run_with_progress(self, node_path: str, processor_class: type) -> None:
-        """Запускает обработку в отдельном потоке с polling-диалогом."""
+        """Запускает обработку в отдельном потоке. Прогресс — в дереве."""
         node_name = Path(node_path).name
-        title = f"{processor_class.icon} {processor_class.display_name}"
 
-        context = ExecutionContext()
+        context = ExecutionContext(node_path=node_path)
+        progress_registry.set(node_path, 0, 0)
+
+        # Точечное обновление: только этот узел станет ⏳
+        # Если узла ещё нет в модели (только что создан) — нужна полная перезагрузка
+        if not self.panel.model.update_node_state(node_path):
+            self.panel.refresh()
+
+        self.panel.start_progress_updates()
+
+        # Блокируем кнопку "Применить"
+        try:
+            self.panel.main_window_ref.settings_panel.processor_tab.set_processing_state(True)
+        except AttributeError:
+            pass
+
         worker = ProcessingWorker(self.panel.project, node_path, context)
         thread = ProcessingThread(worker)
-        dialog = ProgressDialog(node_name, title, context, parent=self.panel)
 
-        # Ссылки на panel, чтобы не собрал GC
         self.panel._current_thread = thread
         self.panel._current_worker = worker
-        self.panel._current_dialog = dialog
         self.panel._current_context = context
 
         def cleanup():
             self.panel._current_thread = None
             self.panel._current_worker = None
-            self.panel._current_dialog = None
             self.panel._current_context = None
 
-        def on_dialog_finished():
-            thread.quit()
-            thread.wait(2000)
+            try:
+                self.panel.main_window_ref.settings_panel.processor_tab.set_processing_state(False)
+            except AttributeError:
+                pass
 
+        def on_finished():
+            # 1. Чистим registry и таймер
+            progress_registry.clear(node_path)
+            self.panel.stop_progress_updates()
+
+            # 2. Точечное обновление узла — стал ✅ / ❌
+            # Если узла нет в модели (новый создан) — полный refresh
+            if not self.panel.model.update_node_state(node_path):
+                self.panel.refresh()
+
+            # 3. Сообщения
             if context.cancelled:
                 log("WARNING", f"Обработка отменена: {node_path}")
                 QMessageBox.information(
@@ -150,13 +161,26 @@ class TreeActions:
             else:
                 log("SUCCESS", f"Узел обработан: {node_path}")
 
-            self.panel.refresh()
+            # 4. Обновляем панель настроек
+            try:
+                settings_panel = self.panel.main_window_ref.settings_panel
+                settings_panel.load_node(settings_panel.current_node_path)
+            except AttributeError:
+                pass
+
             cleanup()
 
-        dialog.finished_external.connect(on_dialog_finished)
-
+        thread.finished.connect(on_finished)
         thread.start()
-        dialog.show()
+
+    # ==================== ОТМЕНА ====================
+
+    def cancel_processing(self) -> None:
+        context = self.panel._current_context
+        if context is None:
+            return
+        log("INFO", f"Запрос отмены обработки: {context.node_path}")
+        context.cancel()
 
     # ==================== ПРОВОДНИК ====================
 
@@ -204,14 +228,10 @@ class TreeActions:
 
         try:
             project.delete_node(node_path)
+            # Удаление — структура изменилась, нужен полный refresh
             self.panel.tree_view.clearSelection()
-            self.panel.model.clear()
-            self.panel.model.setHorizontalHeaderLabels(["Узел"])
-            if project:
-                self.panel.model.load_project(project)
-                self.panel.tree_view.expandAll()
+            self.panel.refresh()
             self.panel.node_selected.emit("")
-            self.panel.tree_changed.emit()
             log("INFO", f"Узел удален: {node_path}")
         except Exception as e:
             log("ERROR", f"Ошибка удаления узла: {e}", exc_info=True)

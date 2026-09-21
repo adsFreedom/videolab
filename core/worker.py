@@ -3,29 +3,24 @@ import time
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QThread
 
 from core.execution import ExecutionContext, CancelledError
 from core.utils import save_yaml, timestamp
 
 
-class ProcessingWorker(QObject):
+class ProcessingWorker:
     """
-    Выполняет обработку узла в отдельном потоке.
-
-    Пишет всё в общий ExecutionContext. НЕ эмитит сигналов с данными.
-    Единственный сигнал — thread_finished (без аргументов), чтобы UI знал,
-    что QThread можно очистить.
+    Выполняет обработку узла. Не QObject — просто класс с методом run().
+    Запускается из ProcessingThread.
     """
 
     def __init__(self, project, node_path: str, context: ExecutionContext):
-        super().__init__()
         self.project = project
         self.node_path = node_path
         self.context = context
 
     def run(self) -> None:
-        """Основная работа. Вызывается в QThread."""
         start_time = time.time()
 
         try:
@@ -68,10 +63,22 @@ class ProcessingWorker(QObject):
 
 
 class ProcessingThread(QThread):
-    """QThread для обработки."""
+    """
+    Поток, который просто выполняет worker.run() и завершается.
+
+    Никакого moveToThread и event loop — мы не используем сигналы Qt
+    между потоками. Когда worker.run() вернёт управление, поток завершится,
+    и QThread.finished эмитится автоматически (Qt сам это делает).
+    """
 
     def __init__(self, worker: ProcessingWorker, parent=None):
         super().__init__(parent)
         self.worker = worker
-        worker.moveToThread(self)
-        self.started.connect(worker.run)
+
+    def run(self) -> None:
+        """Выполняется в новом потоке."""
+        try:
+            self.worker.run()
+        except Exception as e:
+            # На всякий случай — не даём потоку упасть молча
+            print(f"ProcessingThread.run error: {e}", flush=True)

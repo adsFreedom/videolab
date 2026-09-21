@@ -1,5 +1,7 @@
-"""Контекст выполнения обработчика: прогресс, отмена, состояние."""
+"""Контекст выполнения обработчика: отмена и результат."""
 import threading
+
+from core.progress_registry import progress_registry
 
 
 class CancelledError(Exception):
@@ -11,51 +13,32 @@ class ExecutionContext:
     """
     Общий объект между UI-потоком и рабочим потоком.
 
-    Рабочий поток ПИШЕТ в поля: current, total, message, done, error, cancelled, result.
-    UI-поток ЧИТАЕТ эти поля по таймеру.
-
-    Все поля — простые типы (int, bool, str, dict), присвоение которых атомарно
-    благодаря GIL. Никаких сигналов, никаких блокировок.
-
-    Поля:
-        current      — текущий шаг прогресса
-        total        — всего шагов (0 = неизвестно)
-        message      — текстовое сообщение от обработчика
-        done         — True, когда работа завершена (успешно или с ошибкой)
-        cancelled    — True, если пользователь запросил отмену
-        error        — текст ошибки (или None)
-        traceback    — полный traceback ошибки (или None)
-        result       — результат работы (dict, пишется один раз перед done=True)
-        has_progress — True, если обработчик сообщал прогресс (иначе крутящийся индикатор)
+    Прогресс — в ProgressRegistry (глобально).
+    Отмена / ошибки / результат — здесь.
     """
 
-    def __init__(self):
-        self.current: int = 0
-        self.total: int = 0
-        self.message: str = ""
+    def __init__(self, node_path: str = ""):
+        self.node_path = node_path
+
+        # Флаги состояния (пишет worker, читает UI)
         self.done: bool = False
         self.cancelled: bool = False
         self.error: str | None = None
         self.traceback: str | None = None
         self.result: dict | None = None
-        self.has_progress: bool = False
 
-        # Для отмены из UI-потока
         self._cancel_event = threading.Event()
 
     # ==================== API ДЛЯ ОБРАБОТЧИКА ====================
 
     def report_progress(self, current: int, total: int, message: str = "") -> None:
-        """Обработчик сообщает о прогрессе."""
-        self.current = current
-        self.total = total
-        if message:
-            self.message = message
-        self.has_progress = True
+        """Обработчик сообщает о прогрессе. Пишет в ProgressRegistry."""
+        if self.node_path:
+            progress_registry.set(self.node_path, current, total)
 
     def report_message(self, message: str) -> None:
-        """Обработчик сообщает о текущем действии (без прогресса)."""
-        self.message = message
+        """Заглушка — на будущее, если понадобится."""
+        pass
 
     def check_cancel(self) -> None:
         """Выбрасывает CancelledError, если отмена запрошена."""
@@ -63,12 +46,11 @@ class ExecutionContext:
             raise CancelledError("Обработка отменена пользователем")
 
     def is_cancelled(self) -> bool:
-        """Проверяет, отменена ли обработка."""
         return self._cancel_event.is_set()
 
     # ==================== API ДЛЯ UI ====================
 
     def cancel(self) -> None:
-        """Запросить отмену. Вызывается из UI-потока."""
+        """Запросить отмену."""
         self._cancel_event.set()
         self.cancelled = True
