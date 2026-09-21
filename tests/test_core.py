@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from core.project import ProjectManager
-from core.processor_registry import ProcessorRegistry
-from core.base_processor import BaseProcessor
+from core.processors import ProcessorRegistry
+from core.processors import BaseProcessor
 
 
 # ==================== ТЕСТОВЫЙ ОБРАБОТЧИК ====================

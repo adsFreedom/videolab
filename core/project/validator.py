@@ -2,7 +2,7 @@
 import fnmatch
 from pathlib import Path
 
-from core.processor_registry import ProcessorRegistry
+from core.processors import ProcessorRegistry
 from core.utils import load_yaml
 
 

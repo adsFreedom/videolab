@@ -2,7 +2,7 @@
 from pathlib import Path
 from typing import Any
 
-from core.processor_registry import ProcessorRegistry
+from core.processors import ProcessorRegistry
 from core.utils import save_yaml, timestamp, ensure_dir
 
 

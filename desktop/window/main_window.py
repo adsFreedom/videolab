@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 
 from core.logger import logger
 from core.project import ProjectManager
-from core.processor_registry import ProcessorRegistry
+from core.processors import ProcessorRegistry
 from core.utils import load_yaml
 from desktop.styles import DARK_THEME
 from desktop.tree import TreePanel

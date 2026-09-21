@@ -6,18 +6,7 @@ from core.execution import ExecutionContext
 
 
 class BaseProcessor(ABC):
-    """
-    Базовый класс обработчика.
-
-    Атрибуты:
-        name            — уникальное имя (латиница, без пробелов)
-        display_name    — название для UI
-        category        — категория для группировки в UI
-        icon            — эмодзи-иконка
-        input_spec      — описание входных файлов
-        output_mask     — маска выходных файлов
-        settings_schema — схема настроек
-    """
+    """Базовый класс обработчика."""
 
     name: str = "base"
     display_name: str = "Базовый обработчик"
@@ -37,21 +26,6 @@ class BaseProcessor(ABC):
         output_dir: str,
         context: ExecutionContext,
     ) -> dict[str, Any]:
-        """
-        Основная функция обработки.
-
-        Args:
-            input_files: {логическое_имя: путь_к_файлу}
-            settings: настройки из YAML
-            output_dir: папка для результатов
-            context: контекст выполнения (прогресс + отмена)
-
-        Returns:
-            {
-                "output_files": [...],
-                "metadata": {...}
-            }
-        """
         raise NotImplementedError
 
     def get_default_settings(self) -> dict[str, Any]:

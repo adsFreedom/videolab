@@ -2,9 +2,9 @@
 from pathlib import Path
 import cv2
 
-from core.base_processor import BaseProcessor
+from core.processors import BaseProcessor
 from core.execution import ExecutionContext
-from core.processor_registry import ProcessorRegistry
+from core.processors import ProcessorRegistry
 
 
 @ProcessorRegistry.register

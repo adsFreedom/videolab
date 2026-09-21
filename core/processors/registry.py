@@ -1,6 +1,6 @@
 """Реестр обработчиков. Хранит все зарегистрированные обработчики."""
 from typing import Type
-from core.base_processor import BaseProcessor
+from core.processors.base import BaseProcessor
 
 
 class ProcessorRegistry:
@@ -9,15 +9,7 @@ class ProcessorRegistry:
     _processors: dict[str, Type[BaseProcessor]] = {}
 
     @classmethod
-    def register(cls, processor_class: Type[BaseProcessor]) -> Type[
-        BaseProcessor]:
-        """
-        Регистрирует обработчик. Используется как декоратор:
-
-        @ProcessorRegistry.register
-        class MyProcessor(BaseProcessor):
-            ...
-        """
+    def register(cls, processor_class: Type[BaseProcessor]) -> Type[BaseProcessor]:
         if not issubclass(processor_class, BaseProcessor):
             raise TypeError(
                 f"{processor_class.__name__} должен наследоваться от BaseProcessor"
@@ -32,17 +24,14 @@ class ProcessorRegistry:
 
     @classmethod
     def get(cls, name: str) -> Type[BaseProcessor]:
-        """Возвращает класс обработчика по имени."""
         if name not in cls._processors:
             raise KeyError(f"Обработчик '{name}' не найден")
         return cls._processors[name]
 
     @classmethod
     def get_all(cls) -> dict[str, Type[BaseProcessor]]:
-        """Возвращает словарь всех зарегистрированных обработчиков."""
         return cls._processors.copy()
 
     @classmethod
     def clear(cls) -> None:
-        """Очищает реестр (для тестов)."""
         cls._processors.clear()

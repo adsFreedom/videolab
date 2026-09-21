@@ -2,7 +2,7 @@
 import fnmatch
 from pathlib import Path
 
-from core.processor_registry import ProcessorRegistry
+from core.processors import ProcessorRegistry
 
 
 def scan_for_inputs(project_root: Path, start_path: str, mask: str) -> list[str]:

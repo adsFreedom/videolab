@@ -9,7 +9,7 @@ from PySide6.QtCore import Signal
 
 from core.logger import log
 from core.project import ProjectManager
-from core.processor_registry import ProcessorRegistry
+from core.processors import ProcessorRegistry
 from core.utils import load_yaml, save_yaml
 from desktop.widgets.schema_form import SchemaForm
 

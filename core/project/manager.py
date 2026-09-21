@@ -2,9 +2,9 @@
 from pathlib import Path
 from typing import Any
 
-from core.base_processor import BaseProcessor
+from core.processors import BaseProcessor
 from core.execution import ExecutionContext, CancelledError
-from core.processor_registry import ProcessorRegistry
+from core.processors import ProcessorRegistry
 from core.utils import (
     PROJECT_MARKER,
     load_yaml,
