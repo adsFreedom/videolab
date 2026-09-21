@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
 
         if hasattr(self.tree_panel, "model"):
             self.tree_panel.model.clear()
-            self.tree_panel.model.setHorizontalHeaderLabels(["Узел", "Состояние"])
+            self.tree_panel.model.setHorizontalHeaderLabels(["Узел"])
 
         self.files_panel.clear()
         self.settings_panel.clear()

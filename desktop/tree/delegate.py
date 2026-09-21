@@ -1,6 +1,5 @@
-"""Делегат дерева: рисует полоску прогресса в колонке состояния."""
+"""Делегат дерева: прогресс-бар справа от текста."""
 import time
-import math
 
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
 from PySide6.QtCore import Qt, QRect
@@ -11,114 +10,112 @@ from desktop.tree.model import ROLE_PATH, ROLE_STATE
 
 
 class TreeDelegate(QStyledItemDelegate):
-    """
-    Делегат дерева:
-    - колонка 0 — стандартная отрисовка (имя, иконка, выделение);
-    - колонка 1 — полоска прогресса (если узел обрабатывается),
-                  иначе стандартная отрисовка (✅ / ❌).
-    """
+    """Делегат: прогресс-бар справа от текста. Высота строки — 26 px."""
 
-    # Настройки полоски
-    BAR_MARGIN = 4          # отступ от краёв ячейки
-    BAR_HEIGHT = 10         # высота полоски
+    # Параметры
+    BAR_WIDTH = 100
+    BAR_HEIGHT = 14
+    BAR_MARGIN_RIGHT = 8
+    TEXT_GAP = 12
+    ROW_HEIGHT = 22
 
     # Цвета
-    BAR_BG = QColor("#3c3c3c")          # фон полоски
-    BAR_FILL = QColor("#0e639c")        # заполнение
-    BAR_WAVE = QColor("#4fc1ff")        # бегущая волна
+    BAR_BG = QColor("#3c3c3c")
+    BAR_FILL = QColor("#0e639c")
+    BAR_WAVE = QColor("#4fc1ff")
+
+    def sizeHint(self, option, index):
+        """Задаёт высоту строки."""
+        size = super().sizeHint(option, index)
+        size.setHeight(self.ROW_HEIGHT)
+        return size
 
     def paint(self, painter: QPainter, option, index) -> None:
-        # Колонка 1 — рисуем полоску, если узел обрабатывается
-        if index.column() == 1:
-            node_path = index.data(ROLE_PATH)
-            state = index.data(ROLE_STATE)
+        node_path = index.data(ROLE_PATH)
+        state = index.data(ROLE_STATE)
 
-            if state == "processing" and node_path:
-                self._paint_progress(painter, option, node_path)
+        if state == "processing" and node_path:
+            progress = progress_registry.get(node_path)
+            if progress is not None:
+                self._paint_with_progress(painter, option, index, progress)
                 return
 
-        # Всё остальное — стандартная отрисовка
         super().paint(painter, option, index)
 
-    def _paint_progress(self, painter: QPainter, option, node_path: str) -> None:
-        """Рисует полоску прогресса."""
-        progress = progress_registry.get(node_path)
-        if progress is None:
-            return
-
+    def _paint_with_progress(
+        self, painter: QPainter, option, index, progress: tuple[int, int]
+    ) -> None:
         current, total = progress
+        full_rect = option.rect
 
-        # --- Выделение (если ячейка выделена) ---
         if option.state & QStyle.State_Selected:
-            painter.fillRect(option.rect, QColor("#094771"))
+            painter.fillRect(full_rect, QColor("#094771"))
 
-        # --- Область полоски ---
-        rect = option.rect
-        bar_x = rect.left() + self.BAR_MARGIN
-        bar_w = rect.width() - 2 * self.BAR_MARGIN
-        bar_h = self.BAR_HEIGHT
-        bar_y = rect.top() + (rect.height() - bar_h) // 2
+        bar_area_w = self.BAR_WIDTH + self.BAR_MARGIN_RIGHT
+        text_rect = QRect(
+            full_rect.left(),
+            full_rect.top(),
+            max(0, full_rect.width() - bar_area_w - self.TEXT_GAP),
+            full_rect.height(),
+        )
 
-        bar_rect = QRect(bar_x, bar_y, bar_w, bar_h)
+        text_option = option
+        text_option.rect = text_rect
 
-        # --- Фон полоски ---
+        if option.state & QStyle.State_Selected:
+            text_option.state &= ~QStyle.State_Selected
+
+        super().paint(painter, text_option, index)
+
+        bar_rect = QRect(
+            full_rect.right() - self.BAR_MARGIN_RIGHT - self.BAR_WIDTH,
+            full_rect.top() + (full_rect.height() - self.BAR_HEIGHT) // 2,
+            self.BAR_WIDTH,
+            self.BAR_HEIGHT,
+        )
+
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(Qt.NoPen)
         painter.setBrush(self.BAR_BG)
         painter.drawRoundedRect(bar_rect, 3, 3)
 
+        # Шрифт для процентов — маленький
+        font = painter.font()
+        font.setPointSize(8)
+        painter.setFont(font)
+
         if total > 0:
-            # Определённый прогресс
             ratio = max(0.0, min(1.0, current / total))
-            fill_w = int(bar_w * ratio)
+            fill_w = int(bar_rect.width() * ratio)
 
             if fill_w > 0:
-                fill_rect = QRect(bar_x, bar_y, fill_w, bar_h)
+                fill_rect = QRect(
+                    bar_rect.left(), bar_rect.top(),
+                    fill_w, bar_rect.height(),
+                )
                 painter.setBrush(self.BAR_FILL)
                 painter.drawRoundedRect(fill_rect, 3, 3)
 
-            # Текст процентов
             percent = int(ratio * 100)
             painter.setPen(QPen(QColor("#ffffff")))
-            painter.setFont(option.font)
-            painter.drawText(
-                option.rect,
-                Qt.AlignCenter,
-                f"{percent}%",
-            )
+            painter.drawText(bar_rect, Qt.AlignCenter, f"{percent}%")
         else:
-            # Неопределённый — бегущая волна
             self._paint_wave(painter, bar_rect)
-
-            # Текст "..." в центре
             painter.setPen(QPen(QColor("#ffffff")))
-            painter.setFont(option.font)
-            painter.drawText(
-                option.rect,
-                Qt.AlignCenter,
-                "...",
-            )
+            painter.drawText(bar_rect, Qt.AlignCenter, "...")
 
         painter.restore()
 
     def _paint_wave(self, painter: QPainter, bar_rect: QRect) -> None:
-        """Рисует бегущую волну внутри полоски."""
         bar_w = bar_rect.width()
         bar_h = bar_rect.height()
-
         if bar_w <= 0:
             return
 
-        # Фаза волны — меняется со временем
-        phase = (time.time() * 1.5) % 2.0  # 0..2
-
-        # Ширина светлой части — треть полоски
+        phase = (time.time() * 1.5) % 2.0
         wave_w = max(30, bar_w // 3)
-
-        # Позиция волны — двигается слева-направо
-        # phase 0..1: слева за пределами → справа за пределами
-        t = phase if phase < 1.0 else 2.0 - phase  # 0..1..0, туда-обратно
+        t = phase if phase < 1.0 else 2.0 - phase
         wave_x = int(-wave_w + (bar_w + wave_w) * t)
 
         wave_rect = QRect(
@@ -127,8 +124,6 @@ class TreeDelegate(QStyledItemDelegate):
             wave_w,
             bar_h,
         )
-
-        # Ограничиваем в пределах полоски
         clipped = wave_rect.intersected(bar_rect)
         if clipped.width() <= 0:
             return

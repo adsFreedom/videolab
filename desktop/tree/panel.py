@@ -88,8 +88,6 @@ class TreePanel(QWidget):
         self.delegate = TreeDelegate(self.tree_view)
         self.tree_view.setItemDelegate(self.delegate)
 
-        self._configure_columns()
-
         self.tree_view.customContextMenuRequested.connect(self._on_context_menu)
         self.tree_view.selectionModel().selectionChanged.connect(
             self._on_selection_changed
@@ -100,12 +98,6 @@ class TreePanel(QWidget):
         self._progress_timer = QTimer(self)
         self._progress_timer.setInterval(100)
         self._progress_timer.timeout.connect(self._refresh_progress_view)
-
-    def _configure_columns(self) -> None:
-        header = self.tree_view.header()
-        header.setSectionResizeMode(0, header.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, header.ResizeMode.Fixed)
-        self.tree_view.setColumnWidth(1, 120)
 
     # ==================== API ====================
 
@@ -128,7 +120,6 @@ class TreePanel(QWidget):
         index = self.tree_view.currentIndex()
         if not index.isValid():
             return ""
-        index = self.model.index(index.row(), 0, index.parent())
         item = self.model.itemFromIndex(index)
         if not item:
             return ""

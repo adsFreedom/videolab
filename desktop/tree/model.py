@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 
 from core.project import ProjectManager
 from core.progress_registry import progress_registry
+from core.utils import load_yaml
 
 
 PROCESSOR_ICONS = {
@@ -25,96 +26,70 @@ ROLE_STATE = Qt.UserRole + 3
 
 
 class TreeModel(QStandardItemModel):
-    """Модель дерева проекта. Две колонки: имя, состояние."""
+    """Модель дерева проекта. Одна колонка: имя + состояние."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setHorizontalHeaderLabels(["Узел", "Состояние"])
+        self.setHorizontalHeaderLabels(["Узел"])
         self.project: ProjectManager | None = None
 
     # ==================== ЗАГРУЗКА ====================
 
     def load_project(self, project: ProjectManager) -> None:
-        """Полная загрузка дерева. Используется при открытии проекта / refresh."""
         self.project = project
         self.clear()
-        self.setHorizontalHeaderLabels(["Узел", "Состояние"])
+        self.setHorizontalHeaderLabels(["Узел"])
 
         tree_data = project.get_tree()
         validation = project.validate_tree()
 
         for child_data in tree_data.get("children", []):
-            row_items = self._create_row(child_data, validation)
-            if row_items:
-                self.appendRow(row_items)
+            item = self._create_item(child_data, validation)
+            if item:
+                self.appendRow(item)
 
-    def _create_row(
+    def _create_item(
         self,
         node_data: dict[str, Any],
         validation: dict[str, tuple[bool, str]],
-    ) -> list[QStandardItem]:
-        """Создает строку из двух элементов: [имя, состояние]."""
+    ) -> QStandardItem:
+        """Создает QStandardItem с детьми."""
         name = node_data["name"]
         display_name = node_data.get("display_name", name)
         path = node_data["path"]
         processor_type = node_data.get("processor", "")
 
         is_valid, _ = validation.get(path, (False, ""))
-
         is_processing = progress_registry.get(path) is not None
         state = self._compute_state(is_processing, is_valid)
 
-        # Колонка 0: имя
-        name_item = QStandardItem()
-        self._apply_name_item(name_item, name, display_name, path,
-                              processor_type, is_valid, state)
+        item = QStandardItem()
+        self._apply_item(item, name, display_name, path,
+                         processor_type, is_valid, state)
 
-        # Колонка 1: состояние
-        state_item = QStandardItem()
-        self._apply_state_item(state_item, path, state)
-
-        # Дети
         for child_data in node_data.get("children", []):
-            child_items = self._create_row(child_data, validation)
-            if child_items:
-                name_item.appendRow(child_items)
+            child_item = self._create_item(child_data, validation)
+            if child_item:
+                item.appendRow(child_item)
 
-        return [name_item, state_item]
+        return item
 
     # ==================== ОБНОВЛЕНИЕ ОДНОГО УЗЛА ====================
 
     def update_node_state(self, node_path: str) -> bool:
-        """
-        Обновляет только указанный узел: текст, иконку, состояние.
-        Возвращает True, если узел найден.
-        """
-        name_item = self._find_item_by_path(node_path)
-        if name_item is None:
+        """Обновляет только указанный узел. Возвращает True, если найден."""
+        item = self._find_item_by_path(node_path)
+        if item is None:
             return False
 
-        # Родитель в модели
-        parent = name_item.parent()
-        if parent is None:
-            row = name_item.row()
-            state_item = self.item(row, 1)
-        else:
-            row = name_item.row()
-            state_item = parent.child(row, 1)
-
-        if state_item is None:
-            return False
-
-        # Достаём данные узла
         node_path_obj = Path(node_path)
         yaml_path = node_path_obj / f"{node_path_obj.name}.yaml"
-        from core.utils import load_yaml
         node_data = load_yaml(yaml_path)
 
         display_name = node_data.get("display_name", node_path_obj.name)
         processor_type = node_data.get("processor", "")
         name = node_path_obj.name
 
-        # Валидность
         is_valid = False
         if self.project:
             is_valid, _ = self.project.validate_node(node_path)
@@ -122,24 +97,21 @@ class TreeModel(QStandardItemModel):
         is_processing = progress_registry.get(node_path) is not None
         state = self._compute_state(is_processing, is_valid)
 
-        # Обновляем оба item'а
-        self._apply_name_item(name_item, name, display_name, node_path,
-                              processor_type, is_valid, state)
-        self._apply_state_item(state_item, node_path, state)
+        self._apply_item(item, name, display_name, node_path,
+                         processor_type, is_valid, state)
 
         return True
 
     # ==================== ВНУТРЕННИЕ ====================
 
     def _compute_state(self, is_processing: bool, is_valid: bool) -> str:
-        """Вычисляет состояние узла."""
         if is_processing:
             return "processing"
         if is_valid:
             return "valid"
         return "invalid"
 
-    def _apply_name_item(
+    def _apply_item(
         self,
         item: QStandardItem,
         name: str,
@@ -149,7 +121,7 @@ class TreeModel(QStandardItemModel):
         is_valid: bool,
         state: str,
     ) -> None:
-        """Заполняет item колонки 0 данными узла."""
+        """Заполняет item данными."""
         type_icon = PROCESSOR_ICONS.get(processor_type, "📁")
 
         if state == "processing":
@@ -167,32 +139,12 @@ class TreeModel(QStandardItemModel):
             "processing": "Обработка...",
         }[state]
 
-        item.setToolTip(
-            f"{display_name}\nПуть: {path}\nСтатус: {status_text}"
-        )
+        item.setToolTip(f"{display_name}\nПуть: {path}\nСтатус: {status_text}")
         item.setData(path, ROLE_PATH)
         item.setData(is_valid, ROLE_VALID)
         item.setData(state, ROLE_STATE)
 
-    def _apply_state_item(
-        self,
-        item: QStandardItem,
-        path: str,
-        state: str,
-    ) -> None:
-        """Заполняет item колонки 1."""
-        if state == "valid":
-            item.setText("✅")
-        elif state == "invalid":
-            item.setText("❌")
-        else:
-            item.setText("")  # для processing текст не нужен — рисует делегат
-
-        item.setData(path, ROLE_PATH)
-        item.setData(state, ROLE_STATE)
-
     def _find_item_by_path(self, node_path: str) -> QStandardItem | None:
-        """Рекурсивно ищет QStandardItem по ROLE_PATH."""
         for row in range(self.rowCount()):
             index = self.index(row, 0)
             item = self.itemFromIndex(index)
@@ -204,7 +156,6 @@ class TreeModel(QStandardItemModel):
     def _find_item_recursive(
         self, item: QStandardItem, node_path: str
     ) -> QStandardItem | None:
-        """Рекурсивный обход детей."""
         if item is None:
             return None
         if item.data(ROLE_PATH) == node_path:
@@ -217,7 +168,6 @@ class TreeModel(QStandardItemModel):
         return None
 
     def get_path(self, index) -> str:
-        """Возвращает путь к узлу по QModelIndex."""
         if not index.isValid():
             return ""
         item = self.itemFromIndex(index)
