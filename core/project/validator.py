@@ -6,7 +6,7 @@ from core.processors import ProcessorRegistry
 from core.utils import load_yaml
 
 
-def _get_parent_run_at(project_root: Path, node_path: Path) -> str | None:
+def _get_parent_run_at(node_path: Path) -> str | None:
     """Возвращает last_run_at родительского узла (или None)."""
     parent_path = node_path.parent
     parent_yaml = parent_path / f"{parent_path.name}.yaml"
@@ -19,7 +19,10 @@ def _get_parent_run_at(project_root: Path, node_path: Path) -> str | None:
 
 
 def validate_node(node_path: str) -> tuple[bool, str]:
-    """Проверяет один узел (без учёта валидности родителей)."""
+    """
+    Проверяет ОДИН узел (без учёта валидности родителей).
+    Смотрит только на свои данные и last_run_at прямого родителя.
+    """
     node_path_obj = Path(node_path)
 
     if not node_path_obj.exists():
@@ -73,7 +76,7 @@ def validate_node(node_path: str) -> tuple[bool, str]:
         return False, "Требуется обработка"
 
     # 5. Родитель обработан не позже нас?
-    parent_run_at = _get_parent_run_at(None, node_path_obj)
+    parent_run_at = _get_parent_run_at(node_path_obj)
     if parent_run_at is not None:
         my_run_at = node_data.get("last_run_at")
         if my_run_at is None:
@@ -84,33 +87,59 @@ def validate_node(node_path: str) -> tuple[bool, str]:
     return True, ""
 
 
-def validate_tree(project_root: Path) -> dict[str, tuple[bool, str]]:
-    """Валидирует всё дерево сверху вниз."""
+def validate_subtree(
+    node_path: str,
+) -> dict[str, tuple[bool, str]]:
+    """
+    Валидирует узел и ВСЕХ его потомков — сверху вниз.
+
+    Правило: если родитель невалиден, все его потомки тоже невалидны
+    (без проверки их YAML).
+
+    Возвращает {node_path: (is_valid, message)} для узла и всех потомков.
+    """
     result: dict[str, tuple[bool, str]] = {}
 
-    def _walk(node_path: Path, parent_valid: bool) -> None:
-        yaml_file = node_path / f"{node_path.name}.yaml"
+    def _walk(path: Path, parent_valid: bool) -> None:
+        yaml_file = path / f"{path.name}.yaml"
         if not yaml_file.exists():
             return
 
         if not parent_valid:
-            result[str(node_path)] = (False, "Требуется обработка")
+            result[str(path)] = (False, "Требуется обработка")
             is_valid = False
         else:
-            is_valid, msg = validate_node(str(node_path))
-            result[str(node_path)] = (is_valid, msg)
+            is_valid, msg = validate_node(str(path))
+            result[str(path)] = (is_valid, msg)
 
-        if node_path.is_dir():
-            for child in sorted(node_path.iterdir()):
+        # Идём по детям
+        if path.is_dir():
+            for child in sorted(path.iterdir()):
                 if child.is_dir():
                     child_yaml = child / f"{child.name}.yaml"
                     if child_yaml.exists():
                         _walk(child, is_valid)
 
+    node_path_obj = Path(node_path)
+    if not node_path_obj.exists():
+        return result
+
+    _walk(node_path_obj, parent_valid=True)
+    return result
+
+
+def validate_tree(project_root: Path) -> dict[str, tuple[bool, str]]:
+    """
+    Валидирует всё дерево проекта.
+    Вызывает validate_subtree для каждого корневого узла проекта.
+    """
+    result: dict[str, tuple[bool, str]] = {}
+
     for item in sorted(project_root.iterdir()):
         if item.is_dir():
             yaml_file = item / f"{item.name}.yaml"
             if yaml_file.exists():
-                _walk(item, True)
+                subtree = validate_subtree(str(item))
+                result.update(subtree)
 
     return result

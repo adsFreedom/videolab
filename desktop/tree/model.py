@@ -75,52 +75,10 @@ class TreeModel(QStandardItemModel):
     # ==================== ОБНОВЛЕНИЕ УЗЛА ====================
 
     def update_node_state(self, node_path: str) -> bool:
-        """Обновляет только указанный узел. Возвращает True, если найден."""
+        """Обновляет только указанный узел."""
         item = self._find_item_by_path(node_path)
         if item is None:
             return False
-        self._update_item(item, node_path)
-        return True
-
-    def update_node_and_descendants(self, node_path: str) -> bool:
-        """
-        Обновляет узел И ВСЕХ его потомков.
-        Используется после обработки — дети каскадно краснеют.
-        """
-        item = self._find_item_by_path(node_path)
-        if item is None:
-            return False
-
-        # Обновляем сам узел
-        self._update_item(item, node_path)
-
-        # Рекурсивно — всех потомков
-        self._update_descendants(item)
-
-        return True
-
-    # ==================== ВНУТРЕННИЕ ====================
-
-    def _update_descendants(self, parent_item: QStandardItem) -> None:
-        """Рекурсивно обновляет всех потомков."""
-        for row in range(parent_item.rowCount()):
-            child = parent_item.child(row, 0)
-            if child is None:
-                continue
-            child_path = child.data(ROLE_PATH)
-            if child_path:
-                self._update_item(child, child_path)
-            self._update_descendants(child)
-
-    def _update_item(self, item: QStandardItem, node_path: str) -> None:
-        """Обновляет один QStandardItem по данным из YAML."""
-        node_path_obj = Path(node_path)
-        yaml_path = node_path_obj / f"{node_path_obj.name}.yaml"
-        node_data = load_yaml(yaml_path)
-
-        display_name = node_data.get("display_name", node_path_obj.name)
-        processor_type = node_data.get("processor", "")
-        name = node_path_obj.name
 
         is_valid = False
         if self.project:
@@ -128,6 +86,77 @@ class TreeModel(QStandardItemModel):
 
         is_processing = progress_registry.get(node_path) is not None
         state = self._compute_state(is_processing, is_valid)
+
+        self._apply_item_from_node_data(item, node_path, is_valid, state)
+        return True
+
+    def update_node_and_descendants(self, node_path: str) -> bool:
+        """
+        Обновляет узел и всех потомков.
+        Валидация — через validate_subtree (каскад сверху вниз в ядре).
+        """
+        item = self._find_item_by_path(node_path)
+        if item is None:
+            return False
+
+        # Один вызов — получаем валидность всей ветки
+        if self.project:
+            validation = self.project.validate_subtree(node_path)
+        else:
+            validation = {}
+
+        # Обновляем сам узел
+        self._apply_validation(item, node_path, validation)
+
+        # Обновляем всех потомков
+        self._update_descendants_from_validation(item, validation)
+
+        return True
+
+    # ==================== ВНУТРЕННИЕ ====================
+
+    def _update_descendants_from_validation(
+        self,
+        parent_item: QStandardItem,
+        validation: dict[str, tuple[bool, str]],
+    ) -> None:
+        """Обходит всё поддерево и обновляет по готовому validation-словарю."""
+        for row in range(parent_item.rowCount()):
+            child = parent_item.child(row, 0)
+            if child is None:
+                continue
+            child_path = child.data(ROLE_PATH)
+            if child_path:
+                self._apply_validation(child, child_path, validation)
+            self._update_descendants_from_validation(child, validation)
+
+    def _apply_validation(
+        self,
+        item: QStandardItem,
+        node_path: str,
+        validation: dict[str, tuple[bool, str]],
+    ) -> None:
+        """Применяет результат валидации к item."""
+        is_valid, _ = validation.get(node_path, (False, ""))
+        is_processing = progress_registry.get(node_path) is not None
+        state = self._compute_state(is_processing, is_valid)
+        self._apply_item_from_node_data(item, node_path, is_valid, state)
+
+    def _apply_item_from_node_data(
+        self,
+        item: QStandardItem,
+        node_path: str,
+        is_valid: bool,
+        state: str,
+    ) -> None:
+        """Достаёт данные из YAML и вызывает _apply_item."""
+        node_path_obj = Path(node_path)
+        yaml_path = node_path_obj / f"{node_path_obj.name}.yaml"
+        node_data = load_yaml(yaml_path)
+
+        display_name = node_data.get("display_name", node_path_obj.name)
+        processor_type = node_data.get("processor", "")
+        name = node_path_obj.name
 
         self._apply_item(item, name, display_name, node_path,
                          processor_type, is_valid, state)

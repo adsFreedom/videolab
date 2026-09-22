@@ -159,6 +159,10 @@ class ProjectManager:
     def validate_node(self, node_path: str) -> tuple[bool, str]:
         return validator.validate_node(node_path)
 
+    def validate_subtree(self, node_path: str) -> dict[str, tuple[bool, str]]:
+        """Валидирует узел и всех его потомков сверху вниз."""
+        return validator.validate_subtree(node_path)
+
     def validate_tree(self) -> dict[str, tuple[bool, str]]:
         return validator.validate_tree(self.project_root)
 
