@@ -1,7 +1,7 @@
-"""Виджет отрисовки изображения с zoom и выделением области."""
+"""Виджет отрисовки изображения с zoom, выделением и линией."""
 from PySide6.QtWidgets import QWidget, QSizePolicy
 from PySide6.QtCore import Qt, Signal, QRect, QPoint
-from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QPen
+from PySide6.QtGui import QPixmap, QPainter, QColor, QPen
 
 from desktop.viewers.styles import (
     IMAGE_SURFACE_STYLE,
@@ -12,18 +12,21 @@ from desktop.viewers.styles import (
 
 class ImageSurface(QWidget):
     """
-    Виджет для отображения изображения.
+    Виджет отображения изображения.
 
-    Возможности:
-    - zoom по курсору (колесо мыши)
-    - выделение прямоугольной области (ЛКМ + drag)
-    - пипетка (координаты + RGB под курсором)
+    Режимы:
+    - SELECTION: ЛКМ + drag → прямоугольник (для извлечения области).
+    - LINE: ЛКМ + drag → линия (для Line Profile).
     """
+
+    MODE_SELECTION = "selection"
+    MODE_LINE = "line"
 
     pixel_hovered = Signal(int, int, tuple)
     mouse_left = Signal()
-    selection_changed = Signal(object)   # QRect или None
+    selection_changed = Signal(object)         # QRect | None
     zoom_changed = Signal(float)
+    line_drawn = Signal(object, object)        # (QPoint, QPoint) в координатах изображения
 
     MIN_ZOOM = 0.05
     MAX_ZOOM = 32.0
@@ -39,10 +42,18 @@ class ImageSurface(QWidget):
 
         self._last_mouse_pos: tuple[int, int] | None = None
 
+        # Режим
+        self._mode = self.MODE_SELECTION
+
         # Выделение
         self._selection_start: QPoint | None = None
         self._selection_current: QPoint | None = None
         self._selection_active = False
+
+        # Линия
+        self._line_start: QPoint | None = None
+        self._line_current: QPoint | None = None
+        self._line_active = False
 
         self.setMouseTracking(True)
         self.setMinimumSize(320, 240)
@@ -53,16 +64,23 @@ class ImageSurface(QWidget):
 
     # ==================== API ====================
 
+    def set_mode(self, mode: str) -> None:
+        """Переключение режима работы мыши."""
+        self._mode = mode
+        # Сбрасываем активные выделения при смене режима
+        self.clear_selection()
+        self.clear_line()
+
+    def get_mode(self) -> str:
+        return self._mode
+
     def set_image(self, pixmap: QPixmap | None, source_array=None) -> None:
-        """Устанавливает изображение. source_array — numpy для пипетки."""
         self._pixmap = pixmap
         self._source_array = source_array
         self._zoom = 1.0
         self._offset = QPoint(0, 0)
-        self._selection_start = None
-        self._selection_current = None
-        self._selection_active = False
-        self.selection_changed.emit(None)
+        self.clear_selection()
+        self.clear_line()
         self.zoom_changed.emit(self._zoom)
         self.update()
 
@@ -71,13 +89,11 @@ class ImageSurface(QWidget):
         self._source_array = None
         self._zoom = 1.0
         self._offset = QPoint(0, 0)
-        self._selection_start = None
-        self._selection_current = None
-        self._selection_active = False
+        self.clear_selection()
+        self.clear_line()
         self.update()
 
     def fit_to_window(self) -> None:
-        """Масштаб — вписать в окно."""
         if self._pixmap is None:
             return
         w_ratio = self.width() / self._pixmap.width()
@@ -88,7 +104,6 @@ class ImageSurface(QWidget):
         self.update()
 
     def reset_view(self) -> None:
-        """100% + сброс смещения."""
         self._zoom = 1.0
         self._offset = QPoint(0, 0)
         self.zoom_changed.emit(self._zoom)
@@ -101,7 +116,6 @@ class ImageSurface(QWidget):
         self._apply_zoom(1 / 1.25, self.rect().center())
 
     def set_zoom(self, zoom: float) -> None:
-        """Устанавливает zoom без изменения offset."""
         zoom = max(self.MIN_ZOOM, min(self.MAX_ZOOM, zoom))
         self._zoom = zoom
         self.zoom_changed.emit(self._zoom)
@@ -110,8 +124,9 @@ class ImageSurface(QWidget):
     def get_zoom(self) -> float:
         return self._zoom
 
+    # ==================== ВЫДЕЛЕНИЕ ====================
+
     def get_selection_rect(self) -> QRect | None:
-        """Возвращает выделенный прямоугольник в координатах исходного изображения."""
         if self._selection_start is None or self._selection_current is None:
             return None
         r = QRect(self._selection_start, self._selection_current).normalized()
@@ -148,46 +163,73 @@ class ImageSurface(QWidget):
         self.selection_changed.emit(None)
         self.update()
 
+    # ==================== ЛИНИЯ ====================
+
+    def clear_line(self) -> None:
+        self._line_start = None
+        self._line_current = None
+        self._line_active = False
+        self.update()
+
     # ==================== ГЕОМЕТРИЯ ====================
 
     def _pixmap_draw_rect(self) -> tuple[int, int, int, int] | None:
-        """Прямоугольник, куда рисуется изображение (с учётом zoom и offset)."""
         if self._pixmap is None:
             return None
-
         scaled_w = int(self._pixmap.width() * self._zoom)
         scaled_h = int(self._pixmap.height() * self._zoom)
-
         cx = self.width() // 2 + self._offset.x()
         cy = self.height() // 2 + self._offset.y()
-
         x = cx - scaled_w // 2
         y = cy - scaled_h // 2
-
         return (x, y, scaled_w, scaled_h)
 
     def _widget_to_image_pos(self, wx: float, wy: float) -> tuple[int, int] | None:
-        """Координаты виджета → координаты исходного изображения."""
         if self._pixmap is None:
             return None
-
         rect = self._pixmap_draw_rect()
         if rect is None:
             return None
-
         rx, ry, rw, rh = rect
         if rw <= 0 or rh <= 0:
             return None
-
         if wx < rx or wx >= rx + rw or wy < ry or wy >= ry + rh:
             return None
-
         fx = int((wx - rx) * self._pixmap.width() / rw)
         fy = int((wy - ry) * self._pixmap.height() / rh)
-
         fx = max(0, min(fx, self._pixmap.width() - 1))
         fy = max(0, min(fy, self._pixmap.height() - 1))
         return (fx, fy)
+
+    def _widget_to_image_point_clamped(self, wx: float, wy: float) -> QPoint | None:
+        """Как _widget_to_image_pos, но без проверки границ — клампит."""
+        if self._pixmap is None:
+            return None
+        rect = self._pixmap_draw_rect()
+        if rect is None:
+            return None
+        rx, ry, rw, rh = rect
+        if rw <= 0 or rh <= 0:
+            return None
+        fx = int((wx - rx) * self._pixmap.width() / rw)
+        fy = int((wy - ry) * self._pixmap.height() / rh)
+        fx = max(0, min(fx, self._pixmap.width() - 1))
+        fy = max(0, min(fy, self._pixmap.height() - 1))
+        return QPoint(fx, fy)
+
+    def _image_point_to_widget(self, ix: int, iy: int) -> QPoint | None:
+        """Координаты изображения → координаты виджета."""
+        if self._pixmap is None:
+            return None
+        rect = self._pixmap_draw_rect()
+        if rect is None:
+            return None
+        rx, ry, rw, rh = rect
+        if self._pixmap.width() <= 0 or self._pixmap.height() <= 0:
+            return None
+        wx = rx + int(ix * rw / self._pixmap.width())
+        wy = ry + int(iy * rh / self._pixmap.height())
+        return QPoint(wx, wy)
 
     # ==================== РИСОВАНИЕ ====================
 
@@ -220,6 +262,17 @@ class ImageSurface(QWidget):
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(sel_rect)
 
+        # Линия
+        if self._line_start is not None and self._line_current is not None:
+            pen = QPen(QColor("#4fc1ff"), 2)
+            painter.setPen(pen)
+            painter.drawLine(self._line_start, self._line_current)
+
+            # Точки на концах
+            painter.setBrush(QColor("#4fc1ff"))
+            painter.drawEllipse(self._line_start, 3, 3)
+            painter.drawEllipse(self._line_current, 3, 3)
+
         painter.end()
 
     # ==================== СОБЫТИЯ ====================
@@ -244,41 +297,83 @@ class ImageSurface(QWidget):
                 rgb = (r, g, b)
             self.pixel_hovered.emit(fx, fy, rgb)
 
-        # Выделение
+        # Активные операции
         if self._selection_active and self._selection_start is not None:
             self._selection_current = QPoint(int(mx), int(my))
             self.update()
             self.selection_changed.emit(self.get_selection_rect())
 
+        if self._line_active and self._line_start is not None:
+            self._line_current = self._widget_to_image_point_clamped(mx, my)
+            if self._line_current is not None:
+                self._line_current = self._image_point_to_widget(
+                    self._line_current.x(), self._line_current.y()
+                )
+            self.update()
+
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self._selection_active = True
-            self._selection_start = QPoint(
-                int(event.position().x()),
-                int(event.position().y()),
-            )
-            self._selection_current = self._selection_start
+            if self._mode == self.MODE_SELECTION:
+                self._selection_active = True
+                self._selection_start = QPoint(
+                    int(event.position().x()),
+                    int(event.position().y()),
+                )
+                self._selection_current = self._selection_start
+            elif self._mode == self.MODE_LINE:
+                self._line_active = True
+                self._line_start = QPoint(
+                    int(event.position().x()),
+                    int(event.position().y()),
+                )
+                self._line_current = self._line_start
             self.update()
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self._selection_active:
-            self._selection_active = False
-            self.update()
-            self.selection_changed.emit(self.get_selection_rect())
+        if event.button() == Qt.LeftButton:
+            if self._mode == self.MODE_SELECTION and self._selection_active:
+                self._selection_active = False
+                self.update()
+                self.selection_changed.emit(self.get_selection_rect())
+
+            elif self._mode == self.MODE_LINE and self._line_active:
+                self._line_active = False
+                self.update()
+                self._emit_line_profile()
+
         super().mouseReleaseEvent(event)
 
-    def wheelEvent(self, event):
-        """Zoom по курсору."""
-        if self._pixmap is None:
+    def _emit_line_profile(self) -> None:
+        """Собрать начальную и конечную точки линии и эмитить сигнал."""
+        if self._line_start is None or self._line_current is None:
             return
 
+        start_img = self._widget_to_image_point_clamped(
+            self._line_start.x(), self._line_start.y()
+        )
+        end_img = self._widget_to_image_point_clamped(
+            self._line_current.x(), self._line_current.y()
+        )
+        if start_img is None or end_img is None:
+            return
+
+        # Отбрасываем, если линия слишком короткая
+        dx = end_img.x() - start_img.x()
+        dy = end_img.y() - start_img.y()
+        if dx * dx + dy * dy < 4:
+            return
+
+        self.line_drawn.emit(start_img, end_img)
+
+    def wheelEvent(self, event):
+        if self._pixmap is None:
+            return
         delta = event.angleDelta().y()
         if delta == 0:
             return
-
         factor = 1.15 if delta > 0 else 1 / 1.15
         cursor_pos = event.position().toPoint()
         self._apply_zoom(factor, cursor_pos)
@@ -292,18 +387,15 @@ class ImageSurface(QWidget):
     # ==================== ZOOM ====================
 
     def _apply_zoom(self, factor: float, anchor_widget_pos: QPoint) -> None:
-        """Zoom с сохранением точки под курсором."""
         old_zoom = self._zoom
         new_zoom = old_zoom * factor
         new_zoom = max(self.MIN_ZOOM, min(self.MAX_ZOOM, new_zoom))
-
         if abs(new_zoom - old_zoom) < 1e-6:
             return
 
         rect = self._pixmap_draw_rect()
         if rect is None:
             return
-
         rx, ry, rw, rh = rect
         if rw <= 0 or rh <= 0:
             return
