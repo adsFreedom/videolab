@@ -1,7 +1,7 @@
 """Просмотрщик изображения — композиция кирпичей."""
 import numpy as np
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QFrame, QMessageBox,
+    QWidget, QVBoxLayout, QFrame,
 )
 from PySide6.QtCore import Qt, QRect, QPoint
 from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QImage
@@ -16,6 +16,7 @@ from desktop.viewers.image.controls import ImageControls
 from desktop.viewers.image.overlay import ImageOverlay
 from desktop.viewers.image.histogram_window import HistogramWindow
 from desktop.viewers.image.line_profile_window import LineProfileWindow
+from desktop.viewers.image.fft_window import FFTWindow
 
 
 class ImageViewer(BaseViewer):
@@ -27,6 +28,7 @@ class ImageViewer(BaseViewer):
         self._source = ImageSource()
         self._histogram_window: HistogramWindow | None = None
         self._line_profile_window: LineProfileWindow | None = None
+        self._fft_window: FFTWindow | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -40,6 +42,7 @@ class ImageViewer(BaseViewer):
         self._controls.extract_clicked.connect(self._on_extract_selection)
         self._controls.histogram_clicked.connect(self.show_histogram)
         self._controls.line_profile_clicked.connect(self._on_line_profile_toggled)
+        self._controls.fft_clicked.connect(self.show_fft)
         root.addWidget(self._controls)
 
         self._surface_frame = QFrame()
@@ -108,6 +111,7 @@ class ImageViewer(BaseViewer):
         self._refresh_display()
         self._surface.reset_view()
         self._update_histogram()
+        self._update_fft()
         self._overlay.show()
         self._update_overlay()
 
@@ -120,6 +124,8 @@ class ImageViewer(BaseViewer):
             self._histogram_window.close()
         if self._line_profile_window is not None:
             self._line_profile_window.close()
+        if self._fft_window is not None:
+            self._fft_window.close()
 
     # ==================== ОТОБРАЖЕНИЕ ====================
 
@@ -223,7 +229,6 @@ class ImageViewer(BaseViewer):
     # ==================== LINE PROFILE ====================
 
     def _on_line_profile_toggled(self) -> None:
-        """Пользователь нажал кнопку Line Profile."""
         if self._controls.btn_line.isChecked():
             self._surface.set_mode(ImageSurface.MODE_LINE)
             self._surface.setCursor(Qt.CrossCursor)
@@ -233,17 +238,13 @@ class ImageViewer(BaseViewer):
             log("INFO", "Режим: выделение области")
 
     def _on_line_drawn(self, start: QPoint, end: QPoint) -> None:
-        """Пользователь провёл линию — считаем профиль."""
         if not self._source.is_open:
             return
-
         arr = self._source.array
         if arr is None:
             return
 
-        # Профиль считаем по **оригинальному** RGB-массиву (не по каналу)
         r, g, b, y = self._compute_profile(arr, start, end)
-
         if r is None:
             return
 
@@ -262,10 +263,6 @@ class ImageViewer(BaseViewer):
         self._line_profile_window.activateWindow()
 
     def _compute_profile(self, arr: np.ndarray, start: QPoint, end: QPoint):
-        """
-        Считает значения R, G, B, Y вдоль линии.
-        Использует алгоритм Брезенхэма для выборки пикселей.
-        """
         x0, y0 = start.x(), start.y()
         x1, y1 = end.x(), end.y()
 
@@ -280,7 +277,6 @@ class ImageViewer(BaseViewer):
         xs = np.clip(xs, 0, w - 1)
         ys = np.clip(ys, 0, h - 1)
 
-        # RGB или grayscale
         if arr.ndim == 2:
             vals = arr[ys, xs]
             r = vals.astype(float)
@@ -314,6 +310,40 @@ class ImageViewer(BaseViewer):
         self._histogram_window.show()
         self._histogram_window.raise_()
         self._histogram_window.activateWindow()
+
+    # ==================== FFT ====================
+
+    def _update_fft(self) -> None:
+        """Обновить окно FFT, если открыто."""
+        if not self._source.is_open:
+            return
+        if self._fft_window is None:
+            return
+
+        # FFT считаем от **оригинального RGB** массива (не канала)
+        # Это правильно, потому что пользователь может выбрать R / G / B отдельно в окне FFT
+        arr = self._source.array
+        if arr is None:
+            return
+
+        self._fft_window.set_image_array(arr)
+
+    def show_fft(self) -> None:
+        if not self._source.is_open:
+            return
+
+        if self._fft_window is None:
+            self._fft_window = FFTWindow(parent=self.window())
+
+        arr = self._source.array
+        if arr is None:
+            return
+
+        self._fft_window.set_image_array(arr)
+        self._fft_window.setWindowTitle(f"FFT — {self._source.file_name}")
+        self._fft_window.show()
+        self._fft_window.raise_()
+        self._fft_window.activateWindow()
 
 
 class _CropViewerWindow(QWidget):

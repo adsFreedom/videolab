@@ -8,7 +8,7 @@ from desktop.viewers.styles import MEDIA_BUTTON_STYLE, SYMBOL_BUTTON_STYLE
 
 
 class ImageControls(QWidget):
-    """Панель управления: fit, reset, пространство, каналы, снимок, гистограмма, FFT."""
+    """Панель управления."""
 
     fit_clicked = Signal()
     reset_clicked = Signal()
@@ -97,7 +97,7 @@ class ImageControls(QWidget):
         self.btn_histogram.clicked.connect(self.histogram_clicked.emit)
         layout.addWidget(self.btn_histogram)
 
-        # Извлечь область
+        # Извлечь
         self.btn_extract = QPushButton("Извлечь")
         self.btn_extract.setToolTip("Открыть выделенную область в новом окне (Ctrl+E)")
         self.btn_extract.setFixedHeight(btn_size)
