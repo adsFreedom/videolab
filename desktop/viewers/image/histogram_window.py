@@ -1,6 +1,6 @@
 """Окно гистограммы изображения."""
 import numpy as np
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QPainter, QColor, QPen, QFont, QPolygon
 
@@ -26,12 +26,14 @@ class HistogramCanvas(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._data: dict[str, np.ndarray] = {}
+        self._space: str = "RGB"
 
         self.setMinimumSize(460, 300)
         self.setStyleSheet(f"background-color: {HISTOGRAM_BG};")
 
-    def set_data(self, data: dict[str, np.ndarray]) -> None:
+    def set_data(self, data: dict[str, np.ndarray], space: str = "RGB") -> None:
         self._data = data
+        self._space = space
         self.update()
 
     def clear(self) -> None:
@@ -53,33 +55,28 @@ class HistogramCanvas(QWidget):
             painter.end()
             return
 
-        # Максимум
         max_val = 0
         for hist in self._data.values():
             if len(hist) > 0:
                 max_val = max(max_val, int(hist.max()))
 
-        # Сетка + Y-подписи
         self._draw_grid_and_y_labels(painter, plot_x, plot_y, plot_w, plot_h, max_val)
 
-        # Кривые
         if self._data and max_val > 0:
             self._draw_curves(painter, plot_x, plot_y, plot_w, plot_h, max_val)
 
-        # X-подписи
         self._draw_x_labels(painter, plot_x, plot_y, plot_w, plot_h)
-
-        # Подписи осей
         self._draw_axis_titles(painter, plot_x, plot_y, plot_w, plot_h)
 
         painter.end()
+
+    # ==================== СЕТКА ====================
 
     def _draw_grid_and_y_labels(self, painter, x, y, w, h, max_val):
         font = QFont()
         font.setPointSize(7)
         painter.setFont(font)
 
-        # 4 горизонтальные линии с подписями
         for i in range(5):
             gy = y + int(h * i / 4)
             value = int(max_val * (4 - i) / 4)
@@ -95,26 +92,52 @@ class HistogramCanvas(QWidget):
                 self._format_count(value),
             )
 
-        # Вертикальные линии (0, 64, 128, 192, 255)
         for i in range(0, 256, 64):
             gx = x + int(w * i / 255)
             painter.setPen(QPen(QColor(HISTOGRAM_GRID), 1, Qt.DotLine))
             painter.drawLine(gx, y, gx, y + h)
 
-        # Рамка
         painter.setPen(QPen(QColor(HISTOGRAM_AXIS), 1))
         painter.drawRect(x, y, w, h)
 
-    def _draw_curves(self, painter, x, y, w, h, max_val):
-        color_map = {
-            "R": HISTOGRAM_COLOR_R,
-            "G": HISTOGRAM_COLOR_G,
-            "B": HISTOGRAM_COLOR_B,
-            "Y": HISTOGRAM_COLOR_Y,
-            "Gray": HISTOGRAM_COLOR_Y,
-        }
+    # ==================== КРИВЫЕ ====================
 
-        order = ["Y", "B", "G", "R"]
+    def _draw_curves(self, painter, x, y, w, h, max_val):
+        color_maps = {
+            "RGB": {
+                "R": HISTOGRAM_COLOR_R,
+                "G": HISTOGRAM_COLOR_G,
+                "B": HISTOGRAM_COLOR_B,
+                "Y": HISTOGRAM_COLOR_Y,
+                "Gray": HISTOGRAM_COLOR_Y,
+            },
+            "HSV": {
+                "H": "#ff55ff",
+                "S": "#ffaa55",
+                "V": HISTOGRAM_COLOR_Y,
+            },
+            "LAB": {
+                "L": HISTOGRAM_COLOR_Y,
+                "a": HISTOGRAM_COLOR_R,
+                "b": HISTOGRAM_COLOR_B,
+            },
+            "YUV": {
+                "Y": HISTOGRAM_COLOR_Y,
+                "U": "#55ff55",
+                "V": "#5555ff",
+            },
+        }
+        color_map = color_maps.get(self._space, color_maps["RGB"])
+
+        # Порядок отрисовки: сначала «фоновые», потом акцентные
+        order_map = {
+            "RGB": ["Y", "B", "G", "R", "Gray"],
+            "HSV": ["V", "S", "H"],
+            "LAB": ["L", "b", "a"],
+            "YUV": ["Y", "V", "U"],
+        }
+        order = order_map.get(self._space, list(color_map.keys()))
+
         for key in order:
             if key not in self._data:
                 continue
@@ -134,6 +157,8 @@ class HistogramCanvas(QWidget):
 
             polygon = QPolygon(points)
             painter.drawPolyline(polygon)
+
+    # ==================== ПОДПИСИ ====================
 
     def _draw_x_labels(self, painter, x, y, w, h):
         font = QFont()
@@ -157,15 +182,13 @@ class HistogramCanvas(QWidget):
         painter.setFont(font)
         painter.setPen(QPen(QColor(HISTOGRAM_AXIS)))
 
-        # X-подпись
         painter.drawText(
             x, y + h + 20,
             w, 16,
             Qt.AlignCenter,
-            "Яркость (0–255)",
+            "Значение (0–255)",
         )
 
-        # Y-подпись (вертикально)
         painter.save()
         painter.translate(12, y + h // 2)
         painter.rotate(-90)
@@ -177,9 +200,10 @@ class HistogramCanvas(QWidget):
         )
         painter.restore()
 
+    # ==================== УТИЛИТЫ ====================
+
     @staticmethod
     def _format_count(value: int) -> str:
-        """Форматирует количество пикселей (1K, 1M)."""
         if value >= 1_000_000:
             return f"{value / 1_000_000:.1f}M"
         if value >= 1_000:
@@ -188,22 +212,45 @@ class HistogramCanvas(QWidget):
 
 
 class LegendWidget(QWidget):
-    """Легенда с цветами каналов."""
+    """Легенда с цветами каналов. Зависит от пространства."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(28)
+        self._space = "RGB"
+
+    def set_space(self, space: str) -> None:
+        self._space = space
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
 
-        items = [
-            ("R", HISTOGRAM_COLOR_R),
-            ("G", HISTOGRAM_COLOR_G),
-            ("B", HISTOGRAM_COLOR_B),
-            ("Y (яркость)", HISTOGRAM_COLOR_Y),
-        ]
+        legends = {
+            "RGB": [
+                ("R", HISTOGRAM_COLOR_R),
+                ("G", HISTOGRAM_COLOR_G),
+                ("B", HISTOGRAM_COLOR_B),
+                ("Y (яркость)", HISTOGRAM_COLOR_Y),
+            ],
+            "HSV": [
+                ("H (тон)", "#ff55ff"),
+                ("S (насыщенность)", "#ffaa55"),
+                ("V (значение)", HISTOGRAM_COLOR_Y),
+            ],
+            "LAB": [
+                ("L (светлота)", HISTOGRAM_COLOR_Y),
+                ("a (зелёный–красный)", HISTOGRAM_COLOR_R),
+                ("b (синий–жёлтый)", HISTOGRAM_COLOR_B),
+            ],
+            "YUV": [
+                ("Y (яркость)", HISTOGRAM_COLOR_Y),
+                ("U (синий)", "#5555ff"),
+                ("V (красный)", "#ff5555"),
+            ],
+        }
+        items = legends.get(self._space, legends["RGB"])
 
         font = QFont()
         font.setPointSize(8)
@@ -213,16 +260,19 @@ class LegendWidget(QWidget):
         y = self.height() // 2
 
         for label, color in items:
-            # Квадратик цвета
             painter.setPen(QPen(QColor(HISTOGRAM_AXIS), 1))
             painter.setBrush(QColor(color))
             painter.drawRect(x, y - 5, 12, 10)
             x += 16
 
-            # Текст
             painter.setPen(QPen(QColor(HISTOGRAM_AXIS)))
-            painter.drawText(x, y - 8, 120, 16, Qt.AlignLeft | Qt.AlignVCenter, label)
-            x += 100
+            painter.drawText(
+                x, y - 8,
+                180, 16,
+                Qt.AlignLeft | Qt.AlignVCenter,
+                label,
+            )
+            x += 180
 
         painter.end()
 
@@ -234,7 +284,7 @@ class HistogramWindow(QMainWindow):
         super().__init__(parent)
 
         self.setWindowTitle("Гистограмма")
-        self.resize(560, 380)
+        self.resize(620, 400)
 
         self._canvas = HistogramCanvas()
         self._legend = LegendWidget()
@@ -248,8 +298,9 @@ class HistogramWindow(QMainWindow):
 
         self.setCentralWidget(container)
 
-    def set_data(self, data: dict[str, np.ndarray]) -> None:
-        self._canvas.set_data(data)
+    def set_data(self, data: dict[str, np.ndarray], space: str = "RGB") -> None:
+        self._canvas.set_data(data, space)
+        self._legend.set_space(space)
 
     def set_title_file(self, file_name: str) -> None:
         self.setWindowTitle(f"Гистограмма — {file_name}")

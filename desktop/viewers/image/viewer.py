@@ -1,7 +1,7 @@
 """Просмотрщик изображения — композиция кирпичей."""
 import numpy as np
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QFrame, QLabel,
+    QWidget, QVBoxLayout, QFrame,
 )
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QImage
@@ -33,6 +33,7 @@ class ImageViewer(BaseViewer):
         self._controls = ImageControls()
         self._controls.fit_clicked.connect(self._on_fit)
         self._controls.reset_clicked.connect(self._on_reset)
+        self._controls.space_changed.connect(self._on_space_changed)
         self._controls.channel_changed.connect(self._on_channel_changed)
         self._controls.extract_clicked.connect(self._on_extract_selection)
         self._controls.histogram_clicked.connect(self.show_histogram)
@@ -62,7 +63,6 @@ class ImageViewer(BaseViewer):
         self._pixel_info = PixelInfoWidget()
         root.addWidget(self._pixel_info)
 
-        # Горячие клавиши
         QShortcut(QKeySequence("Ctrl++"), self, self._on_zoom_in,
                   context=Qt.ApplicationShortcut)
         QShortcut(QKeySequence("Ctrl+="), self, self._on_zoom_in,
@@ -92,31 +92,23 @@ class ImageViewer(BaseViewer):
         self._finish_load()
 
     def load_from_array(self, arr: np.ndarray, name: str = "crop") -> None:
-        """Загружает изображение из numpy-массива."""
         if not self._source.open_from_array(arr, name):
             log("ERROR", "Не удалось загрузить изображение из массива")
             return
-
         log("INFO", f"Изображение (crop): {self._source.width}x{self._source.height}")
         self._finish_load()
 
     def _finish_load(self) -> None:
-        """Общий код после загрузки."""
         self._controls.set_enabled_controls(True)
 
-        channels = ["RGB"]
-        if self._source.has_alpha:
-            channels.append("A")
-        channels.extend(["R", "G", "B", "Y", "Gray"])
+        # Сначала пространство, потом каналы
+        space = self._controls.get_space()
+        channels = self._source.get_available_channels(space)
         self._controls.set_channels(channels)
 
         self._refresh_display()
-
-        # 100% zoom (не fit)
         self._surface.reset_view()
-
         self._update_histogram()
-
         self._overlay.show()
         self._update_overlay()
 
@@ -134,8 +126,9 @@ class ImageViewer(BaseViewer):
         if not self._source.is_open:
             return
 
+        space = self._controls.get_space()
         channel = self._controls.get_channel()
-        arr = self._source.get_channel_array(channel)
+        arr = self._source.get_channel_array(channel, space)
         if arr is None:
             return
 
@@ -157,7 +150,7 @@ class ImageViewer(BaseViewer):
             height=self._source.height,
             fmt=self._source.format,
             has_alpha=self._source.has_alpha,
-            channel=self._controls.get_channel(),
+            channel=f"{self._controls.get_space()} / {self._controls.get_channel()}",
             zoom=self._surface.get_zoom(),
         )
 
@@ -175,10 +168,25 @@ class ImageViewer(BaseViewer):
     def _on_reset(self) -> None:
         self._surface.reset_view()
 
+    def _on_space_changed(self, space: str) -> None:
+        """Пользователь переключил пространство."""
+        if not self._source.is_open:
+            return
+
+        # Обновляем список каналов
+        channels = self._source.get_available_channels(space)
+        self._controls.set_channels(channels)
+
+        # Обновляем отображение
+        old_zoom = self._surface.get_zoom()
+        self._refresh_display()
+        self._surface.set_zoom(old_zoom)
+        self._update_overlay()
+        self._update_histogram()
+
     def _on_channel_changed(self, channel: str) -> None:
         if not self._source.is_open:
             return
-        # Сохраняем zoom и offset
         old_zoom = self._surface.get_zoom()
         self._refresh_display()
         self._surface.set_zoom(old_zoom)
@@ -217,12 +225,10 @@ class ImageViewer(BaseViewer):
 
         crop_name = f"{self._source.file_name}_crop_{x}_{y}_{w}_{h}"
 
-        # Открываем новый ViewerWindow с ImageViewer внутри
         crop_window = _CropViewerWindow(crop, crop_name, parent=self.window())
         crop_window.show()
 
         log("INFO", f"Извлечена область: {x},{y} {w}x{h}")
-
         self._surface.clear_selection()
 
     # ==================== ГИСТОГРАММА ====================
@@ -233,8 +239,9 @@ class ImageViewer(BaseViewer):
         if self._histogram_window is None:
             return
 
-        data = self._source.get_histogram_data()
-        self._histogram_window.set_data(data)
+        space = self._controls.get_space()
+        data = self._source.get_histogram_data(space)
+        self._histogram_window.set_data(data, space)
         self._histogram_window.set_title_file(self._source.file_name)
 
     def show_histogram(self) -> None:

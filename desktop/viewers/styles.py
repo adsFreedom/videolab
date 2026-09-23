@@ -184,3 +184,43 @@ HISTOGRAM_COLOR_G = "#55ff55"
 HISTOGRAM_COLOR_B = "#5599ff"
 HISTOGRAM_COLOR_Y = "#ffffff"
 HISTOGRAM_COLOR_GRAY = "#cccccc"
+
+# ==================== КНОПКИ С СИМВОЛАМИ ====================
+
+SYMBOL_BUTTON_STYLE = """
+QPushButton {
+    background-color: #3a3a3d;
+    border: 1px solid #4a4a4d;
+    border-radius: 3px;
+    color: #d4d4d4;
+    font-size: 16pt;
+    padding: 0;
+}
+
+QPushButton:hover {
+    background-color: #4a4a4e;
+    border: 1px solid #5a5a5e;
+}
+
+QPushButton:pressed {
+    background-color: #2a4a6a;
+    border: 1px solid #3a5a7a;
+}
+
+QPushButton:checked {
+    background-color: #0e639c;
+    border: 1px solid #1177bb;
+    color: #ffffff;
+}
+
+QPushButton:checked:hover {
+    background-color: #1177bb;
+    border: 1px solid #2a87cb;
+}
+
+QPushButton:disabled {
+    background-color: #2a2a2d;
+    border: 1px solid #3a3a3d;
+    color: #666666;
+}
+"""

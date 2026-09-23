@@ -4,17 +4,20 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from desktop.viewers.styles import MEDIA_BUTTON_STYLE
+from desktop.viewers.styles import MEDIA_BUTTON_STYLE, SYMBOL_BUTTON_STYLE
 
 
 class ImageControls(QWidget):
-    """Панель управления: fit, reset, каналы, снимок, гистограмма."""
+    """Панель управления: fit, reset, пространство, каналы, снимок, гистограмма, FFT."""
 
     fit_clicked = Signal()
     reset_clicked = Signal()
+    space_changed = Signal(str)
     channel_changed = Signal(str)
     extract_clicked = Signal()
     histogram_clicked = Signal()
+    fft_clicked = Signal()
+    line_profile_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,7 +44,7 @@ class ImageControls(QWidget):
         self.btn_reset.clicked.connect(self.reset_clicked.emit)
         layout.addWidget(self.btn_reset)
 
-        # Индикатор zoom
+        # Zoom label
         self.label_zoom = QLabel("100%")
         self.label_zoom.setFixedWidth(60)
         self.label_zoom.setAlignment(Qt.AlignCenter)
@@ -49,6 +52,16 @@ class ImageControls(QWidget):
         layout.addWidget(self.label_zoom)
 
         layout.addStretch()
+
+        # Пространство
+        layout.addWidget(QLabel("Пространство:"))
+        self.combo_space = QComboBox()
+        self.combo_space.setFixedWidth(80)
+        self.combo_space.addItems(["RGB", "HSV", "LAB", "YUV"])
+        self.combo_space.currentTextChanged.connect(self.space_changed.emit)
+        layout.addWidget(self.combo_space)
+
+        layout.addSpacing(8)
 
         # Каналы
         layout.addWidget(QLabel("Канал:"))
@@ -59,16 +72,33 @@ class ImageControls(QWidget):
 
         layout.addSpacing(8)
 
+        # Line Profile
+        self.btn_line = QPushButton("↗")
+        self.btn_line.setToolTip("Профиль по линии")
+        self.btn_line.setCheckable(True)
+        self.btn_line.setFixedSize(btn_size, btn_size)
+        self.btn_line.setStyleSheet(SYMBOL_BUTTON_STYLE)
+        self.btn_line.clicked.connect(self.line_profile_clicked.emit)
+        layout.addWidget(self.btn_line)
+
+        # FFT
+        self.btn_fft = QPushButton("FFT")
+        self.btn_fft.setToolTip("Спектр Фурье изображения")
+        self.btn_fft.setFixedSize(52, btn_size)
+        self.btn_fft.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self.btn_fft.clicked.connect(self.fft_clicked.emit)
+        layout.addWidget(self.btn_fft)
+
         # Гистограмма
         self.btn_histogram = QPushButton("📊")
         self.btn_histogram.setToolTip("Показать гистограмму")
         self.btn_histogram.setFixedSize(btn_size, btn_size)
-        self.btn_histogram.setStyleSheet(MEDIA_BUTTON_STYLE + "\nfont-size: 14pt;")
+        self.btn_histogram.setStyleSheet(SYMBOL_BUTTON_STYLE)
         self.btn_histogram.clicked.connect(self.histogram_clicked.emit)
         layout.addWidget(self.btn_histogram)
 
         # Извлечь область
-        self.btn_extract = QPushButton("Извлечь область")
+        self.btn_extract = QPushButton("Извлечь")
         self.btn_extract.setToolTip("Открыть выделенную область в новом окне (Ctrl+E)")
         self.btn_extract.setFixedHeight(btn_size)
         self.btn_extract.setStyleSheet(MEDIA_BUTTON_STYLE)
@@ -93,11 +123,17 @@ class ImageControls(QWidget):
     def get_channel(self) -> str:
         return self.combo_channel.currentText()
 
+    def get_space(self) -> str:
+        return self.combo_space.currentText()
+
     def set_extract_enabled(self, enabled: bool) -> None:
         self.btn_extract.setEnabled(enabled)
 
     def set_enabled_controls(self, enabled: bool) -> None:
         self.btn_fit.setEnabled(enabled)
         self.btn_reset.setEnabled(enabled)
+        self.combo_space.setEnabled(enabled)
         self.combo_channel.setEnabled(enabled)
         self.btn_histogram.setEnabled(enabled)
+        self.btn_fft.setEnabled(enabled)
+        self.btn_line.setEnabled(enabled)
