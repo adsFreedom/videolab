@@ -5,6 +5,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPainter, QColor, QPen, QFont
 
+from desktop.viewers.styles import (
+    SPEED_VALUE_LABEL_STYLE,
+    TICK_COLOR,
+    TICK_LABEL_COLOR,
+)
+
 
 class TicksWidget(QWidget):
     """Виджет с рисками и подписями, синхронизированный со слайдером."""
@@ -17,8 +23,8 @@ class TicksWidget(QWidget):
         self._slider = slider
         self.setFixedWidth(30)
 
-        self._tick_color = QColor("#666666")
-        self._label_color = QColor("#a0a0a0")
+        self._tick_color = QColor(TICK_COLOR)
+        self._label_color = QColor(TICK_LABEL_COLOR)
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -29,7 +35,6 @@ class TicksWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, False)
 
-        # Те же границы, что у слайдера (стандартные ~10 px отступы)
         groove_top = 10
         groove_bottom = self._slider.height() - 10
         groove_height = groove_bottom - groove_top
@@ -50,11 +55,9 @@ class TicksWidget(QWidget):
             ratio = (value - minimum) / (maximum - minimum)
             y = groove_bottom - int(ratio * groove_height)
 
-            # Риска
             painter.setPen(QPen(self._tick_color, 1))
             painter.drawLine(0, y, self.TICK_LENGTH, y)
 
-            # Подпись
             painter.setPen(QPen(self._label_color))
             label = f"{value / 10:.1f}"
             painter.drawText(
@@ -87,15 +90,11 @@ class SpeedSlider(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # Метка сверху — текущее значение
         self._value_label = QLabel("1.0x")
         self._value_label.setAlignment(Qt.AlignCenter)
-        self._value_label.setStyleSheet(
-            "font-family: Consolas, monospace; font-size: 9pt;"
-        )
+        self._value_label.setStyleSheet(SPEED_VALUE_LABEL_STYLE)
         layout.addWidget(self._value_label)
 
-        # Слайдер + риски в одной строке
         middle = QHBoxLayout()
         middle.setContentsMargins(0, 0, 0, 0)
         middle.setSpacing(0)
@@ -111,15 +110,13 @@ class SpeedSlider(QWidget):
         self._slider.valueChanged.connect(self._on_value_changed)
         middle.addWidget(self._slider, alignment=Qt.AlignHCenter)
 
-        # Виджет рисок — справа от слайдера
         self._ticks = TicksWidget(self._slider)
         middle.addWidget(self._ticks, alignment=Qt.AlignVCenter)
 
         middle.addStretch()
         layout.addLayout(middle, stretch=1)
 
-        # Кнопка сброса
-        self._btn_reset = QPushButton("x1")
+        self._btn_reset = QPushButton("1.0x")
         self._btn_reset.setToolTip("Сбросить скорость на 1.0x")
         self._btn_reset.setFixedWidth(48)
         self._btn_reset.clicked.connect(self._on_reset)

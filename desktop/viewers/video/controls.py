@@ -4,42 +4,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-
-MEDIA_BUTTON_STYLE = """
-QPushButton {
-    background-color: #3a3a3d;
-    border: 1px solid #4a4a4d;
-    border-radius: 3px;
-    color: #d4d4d4;
-}
-
-QPushButton:hover {
-    background-color: #4a4a4e;
-    border: 1px solid #5a5a5e;
-}
-
-QPushButton:pressed {
-    background-color: #2a4a6a;
-    border: 1px solid #3a5a7a;
-}
-
-QPushButton:checked {
-    background-color: #0e639c;
-    border: 1px solid #1177bb;
-    color: #ffffff;
-}
-
-QPushButton:checked:hover {
-    background-color: #1177bb;
-    border: 1px solid #2a87cb;
-}
-
-QPushButton:disabled {
-    background-color: #2a2a2d;
-    border: 1px solid #3a3a3d;
-    color: #666666;
-}
-"""
+from desktop.viewers.styles import MEDIA_BUTTON_STYLE
 
 
 class VideoControls(QWidget):
@@ -62,7 +27,6 @@ class VideoControls(QWidget):
         layout.setSpacing(6)
 
         style = self.style()
-
         btn_size = 36
 
         # Play / Pause
@@ -83,7 +47,7 @@ class VideoControls(QWidget):
         self.btn_stop.clicked.connect(self.stop_clicked.emit)
         layout.addWidget(self.btn_stop)
 
-        # Loop — иконка SP_BrowserReload (стрелка по кругу)
+        # Loop
         self.btn_loop = QPushButton()
         self.btn_loop.setIcon(style.standardIcon(QStyle.SP_BrowserReload))
         self.btn_loop.setCheckable(True)
@@ -114,7 +78,6 @@ class VideoControls(QWidget):
         self._update_frame_label(self.slider.value())
 
     def set_current_frame(self, frame_index: int) -> None:
-        """frame_index — внутренний (0-based). В UI показываем 1-based."""
         if self._is_slider_dragging:
             return
         self.slider.blockSignals(True)
@@ -139,7 +102,6 @@ class VideoControls(QWidget):
     # ==================== ВНУТРЕННИЕ ====================
 
     def _update_frame_label(self, frame_index: int) -> None:
-        """frame_index — внутренний (0-based). Показываем 1-based."""
         display = frame_index + 1 if self._total_frames > 0 else 0
         self.label_frame.setText(f"{display} / {self._total_frames}")
 

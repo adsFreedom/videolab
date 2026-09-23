@@ -2,6 +2,8 @@
 from PySide6.QtWidgets import QLabel
 from PySide6.QtCore import Qt
 
+from desktop.viewers.styles import VIDEO_OVERLAY_STYLE
+
 
 class OverlayWidget(QLabel):
     """Оверлей: время, кадр, fps."""
@@ -9,16 +11,7 @@ class OverlayWidget(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setStyleSheet("""
-            QLabel {
-                background-color: rgba(0, 0, 0, 160);
-                color: #ffffff;
-                padding: 4px 8px;
-                border-radius: 3px;
-                font-family: Consolas, monospace;
-                font-size: 9pt;
-            }
-        """)
+        self.setStyleSheet(VIDEO_OVERLAY_STYLE)
         self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.setText("")
 
@@ -32,11 +25,9 @@ class OverlayWidget(QLabel):
         width: int,
         height: int,
     ) -> None:
-        """frame_index — внутренний (0-based). Показываем 1-based."""
         time_str = self._format_time(time_sec)
         dur_str = self._format_time(duration)
 
-        # 1-based для пользователя
         display_frame = frame_index + 1
 
         text = (

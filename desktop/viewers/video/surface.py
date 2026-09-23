@@ -4,6 +4,8 @@ from PySide6.QtWidgets import QWidget, QSizePolicy
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QPixmap, QPainter, QColor
 
+from desktop.viewers.styles import VIDEO_SURFACE_STYLE
+
 
 class VideoSurface(QWidget):
     """Виджет для отображения кадра видео."""
@@ -22,7 +24,7 @@ class VideoSurface(QWidget):
         self.setMouseTracking(True)
         self.setMinimumSize(320, 240)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setStyleSheet("background-color: #1a1a1a;")
+        self.setStyleSheet(VIDEO_SURFACE_STYLE)
         self.setCursor(Qt.PointingHandCursor)
 
     def set_frame(self, frame: np.ndarray | None) -> None:
@@ -116,7 +118,6 @@ class VideoSurface(QWidget):
         self.pixel_hovered.emit(fx, fy, (int(r), int(g), int(b)))
 
     def mousePressEvent(self, event):
-        """ЛКМ — эмитим clicked."""
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)

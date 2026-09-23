@@ -7,21 +7,13 @@ from PySide6.QtGui import QKeySequence, QShortcut
 
 from core.logger import log
 from desktop.viewers.base import BaseViewer
+from desktop.viewers.styles import VIDEO_FRAME_STYLE
 from desktop.viewers.video.source import VideoSource
 from desktop.viewers.video.surface import VideoSurface
 from desktop.viewers.video.controls import VideoControls
 from desktop.viewers.video.overlay import OverlayWidget
 from desktop.viewers.video.pixel_info import PixelInfoWidget
 from desktop.viewers.video.speed_slider import SpeedSlider
-
-
-SURFACE_FRAME_STYLE = """
-QFrame#VideoFrame {
-    border: 2px solid #3e4a5a;
-    border-radius: 4px;
-    background-color: #0d0d0d;
-}
-"""
 
 
 class VideoViewer(BaseViewer):
@@ -38,7 +30,6 @@ class VideoViewer(BaseViewer):
         self._is_playing = False
         self._loop = False
 
-        # --- Компоновка ---
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -53,7 +44,7 @@ class VideoViewer(BaseViewer):
 
         self._surface_frame = QFrame()
         self._surface_frame.setObjectName("VideoFrame")
-        self._surface_frame.setStyleSheet(SURFACE_FRAME_STYLE)
+        self._surface_frame.setStyleSheet(VIDEO_FRAME_STYLE)
 
         frame_layout = QVBoxLayout(self._surface_frame)
         frame_layout.setContentsMargins(2, 2, 2, 2)
@@ -91,7 +82,6 @@ class VideoViewer(BaseViewer):
 
         self._controls.set_enabled_controls(False)
 
-        # --- Горячие клавиши ---
         QShortcut(QKeySequence("Space"), self, self._on_play_pause,
                   context=Qt.ApplicationShortcut)
         QShortcut(QKeySequence("Left"), self, self._on_step_backward,
@@ -149,7 +139,6 @@ class VideoViewer(BaseViewer):
             self._play()
 
     def _on_surface_clicked(self) -> None:
-        """Клик по видео — play/pause. Если видео в конце — с начала."""
         if not self._source.is_open:
             return
         if self._is_playing:
