@@ -287,7 +287,6 @@ class VideoViewer(BaseViewer):
         )
 
     def _update_markers(self) -> None:
-        """Обновить позиции маркеров (например, при resize)."""
         if self._marked_pixel is not None:
             img_x, img_y = self._marked_pixel
             widget_pos = self._surface.image_to_widget_pos(img_x, img_y)
@@ -314,7 +313,8 @@ class VideoViewer(BaseViewer):
             self._pixel_marker.clear()
             log("INFO", "Режим: воспроизведение")
 
-    def _on_pixel_marked(self, img_x: int, img_y: int, widget_pos: QPoint) -> None:
+    def _on_pixel_marked(self, img_x: int, img_y: int,
+                         widget_pos: QPoint) -> None:
         self._marked_pixel = (img_x, img_y)
         self._pixel_marker.set_pixel(self._marked_pixel, widget_pos)
         log("INFO", f"Пиксель отмечен: ({img_x}, {img_y})")
@@ -333,7 +333,7 @@ class VideoViewer(BaseViewer):
             log("INFO", "Режим: воспроизведение")
 
     def _on_roi_marked(
-        self, x: int, y: int, w: int, h: int, widget_rect: QRect,
+            self, x: int, y: int, w: int, h: int, widget_rect: QRect,
     ) -> None:
         self._marked_roi = (x, y, w, h)
         self._roi_marker.set_rect((x, y, w, h), widget_rect)
@@ -343,7 +343,6 @@ class VideoViewer(BaseViewer):
     # ==================== СБОР СИГНАЛА ====================
 
     def _collect_pixel_signal(self) -> None:
-        """Сбор RGB для отмеченного пикселя."""
         if self._marked_pixel is None or not self._source.is_open:
             return
 
@@ -362,10 +361,12 @@ class VideoViewer(BaseViewer):
             return (int(r), int(g), int(b))
 
         title = f"пикселя ({img_x}, {img_y})"
-        self._collect_and_show(video_path, info, picker, title)
+        self._collect_and_show(
+            video_path, info, picker, title,
+            roi=None,
+        )
 
     def _collect_roi_signal(self) -> None:
-        """Сбор среднего RGB по ROI."""
         if self._marked_roi is None or not self._source.is_open:
             return
 
@@ -390,9 +391,19 @@ class VideoViewer(BaseViewer):
             return (int(r), int(g), int(b))
 
         title = f"ROI ({rx}, {ry}) {rw}x{rh}"
-        self._collect_and_show(video_path, info, picker, title)
+        self._collect_and_show(
+            video_path, info, picker, title,
+            roi=self._marked_roi,
+        )
 
-    def _collect_and_show(self, video_path, info, picker, title: str) -> None:
+    def _collect_and_show(
+            self,
+            video_path,
+            info,
+            picker,
+            title: str,
+            roi: tuple[int, int, int, int] | None = None,
+    ) -> None:
         """Общий сбор данных и открытие окна сигнала."""
         progress = QProgressDialog(
             f"Сбор данных: {title}...",
@@ -409,6 +420,7 @@ class VideoViewer(BaseViewer):
             return
 
         values = []
+        first_frame_rgb = None
         frame_idx = 0
 
         while True:
@@ -420,6 +432,9 @@ class VideoViewer(BaseViewer):
                 progress.setValue(frame_idx)
                 if progress.wasCanceled():
                     break
+
+            if frame_idx == 0:
+                first_frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
             values.append(picker(frame))
             frame_idx += 1
@@ -436,11 +451,16 @@ class VideoViewer(BaseViewer):
 
         if self._signal_window is None:
             self._signal_window = SignalWindow(parent=self.window())
+
         self._signal_window.set_signal(
             rgb_data=rgb_data,
             fps=info.fps,
             pixel_xy=(0, 0),
             video_name=f"{self._source.file_name} — {title}",
+            video_path=video_path,
+            video_size=(info.width, info.height),
+            first_frame=first_frame_rgb,
+            roi=roi,
         )
         self._signal_window.show()
         self._signal_window.raise_()

@@ -34,10 +34,18 @@ class SignalWindow(QMainWindow):
         self._rgb_data: np.ndarray | None = None
         self._fps: float = 0.0
         self._video_name: str = ""
+        self._video_path: str = ""
+        self._video_size: tuple[int, int] = (0, 0)
+        self._first_frame: np.ndarray | None = None
 
-        # Кривые текущего пространства (пересоздаются при смене)
+        # ROI (x, y, w, h) — либо None (для пикселя)
+        self._roi: tuple[int, int, int, int] | None = None
+
         self._curves: list[pg.PlotDataItem] = []
         self._legend = None
+        self._current_peaks: list[float] = []
+
+        self._power_map_window = None
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -55,6 +63,16 @@ class SignalWindow(QMainWindow):
         self.combo_space.addItems(["RGB", "HSV", "LAB", "YUV"])
         self.combo_space.currentTextChanged.connect(self._on_space_changed)
         top_panel.addWidget(self.combo_space)
+
+        top_panel.addSpacing(16)
+
+        self.btn_power_map = QPushButton("Карта на частоте")
+        self.btn_power_map.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self.btn_power_map.setToolTip(
+            "Показать, где в выделенной области сигнал на этой частоте максимален"
+        )
+        self.btn_power_map.clicked.connect(self._show_power_map)
+        top_panel.addWidget(self.btn_power_map)
 
         top_panel.addStretch()
         layout.addLayout(top_panel)
@@ -75,10 +93,7 @@ class SignalWindow(QMainWindow):
         self._fft_plot.setLabel("bottom", "Частота (Гц)")
         self._fft_plot.setLabel("left", "Амплитуда")
 
-        # Легенда (создаём заново при смене пространства)
         self._legend = self._fft_plot.addLegend()
-
-        # Пики
         self._peak_labels: list[pg.TextItem] = []
 
         layout.addWidget(self._fft_plot, stretch=1)
@@ -97,7 +112,6 @@ class SignalWindow(QMainWindow):
 
         self.setCentralWidget(container)
 
-        # Инициализируем кривые для RGB по умолчанию
         self._rebuild_curves("RGB")
 
     # ==================== API ====================
@@ -108,14 +122,21 @@ class SignalWindow(QMainWindow):
         fps: float,
         pixel_xy: tuple[int, int],
         video_name: str,
+        video_path: str = "",
+        video_size: tuple[int, int] = (0, 0),
+        first_frame: np.ndarray | None = None,
+        roi: tuple[int, int, int, int] | None = None,
     ) -> None:
-        """Сохраняем исходные данные RGB."""
         if rgb_data is None or len(rgb_data) < 2:
             return
 
         self._rgb_data = rgb_data.copy()
         self._fps = fps
         self._video_name = video_name
+        self._video_path = video_path
+        self._video_size = video_size
+        self._first_frame = first_frame
+        self._roi = roi
 
         self._refresh()
 
@@ -125,6 +146,7 @@ class SignalWindow(QMainWindow):
             c.setData([], [])
         self._clear_peaks()
         self._info_label.setText("(нет данных)")
+        self._current_peaks = []
 
     # ==================== ПЕРЕСЧЁТ ====================
 
@@ -133,47 +155,24 @@ class SignalWindow(QMainWindow):
         self._refresh()
 
     def _rebuild_curves(self, space: str) -> None:
-        """Пересоздаёт кривые и легенду для нового пространства."""
-        # Удаляем старые кривые
         for c in self._curves:
             self._fft_plot.removeItem(c)
         self._curves.clear()
 
-        # Удаляем старую легенду и создаём новую
         if self._legend is not None:
             self._fft_plot.removeItem(self._legend)
         self._legend = self._fft_plot.addLegend()
 
-        # Метки и цвета по пространствам
         configs = {
-            "RGB": [
-                ("R", HISTOGRAM_COLOR_R),
-                ("G", HISTOGRAM_COLOR_G),
-                ("B", HISTOGRAM_COLOR_B),
-            ],
-            "HSV": [
-                ("H", "#ff55ff"),
-                ("S", "#ffaa55"),
-                ("V", HISTOGRAM_COLOR_Y),
-            ],
-            "LAB": [
-                ("L", HISTOGRAM_COLOR_Y),
-                ("a", HISTOGRAM_COLOR_R),
-                ("b", HISTOGRAM_COLOR_B),
-            ],
-            "YUV": [
-                ("Y", HISTOGRAM_COLOR_Y),
-                ("U", "#5555ff"),
-                ("V", "#ff5555"),
-            ],
+            "RGB": [("R", HISTOGRAM_COLOR_R), ("G", HISTOGRAM_COLOR_G), ("B", HISTOGRAM_COLOR_B)],
+            "HSV": [("H", "#ff55ff"), ("S", "#ffaa55"), ("V", HISTOGRAM_COLOR_Y)],
+            "LAB": [("L", HISTOGRAM_COLOR_Y), ("a", HISTOGRAM_COLOR_R), ("b", HISTOGRAM_COLOR_B)],
+            "YUV": [("Y", HISTOGRAM_COLOR_Y), ("U", "#5555ff"), ("V", "#ff5555")],
         }
         config = configs.get(space, configs["RGB"])
 
-        # Создаём 3 кривые
         for label, color in config:
-            curve = self._fft_plot.plot(
-                pen=pg.mkPen(color, width=1.2), name=label,
-            )
+            curve = self._fft_plot.plot(pen=pg.mkPen(color, width=1.2), name=label)
             self._curves.append(curve)
 
     def _refresh(self) -> None:
@@ -181,8 +180,6 @@ class SignalWindow(QMainWindow):
             return
 
         space = self.combo_space.currentText()
-
-        # 1. Получаем каналы
         channels, labels = self._get_channels(self._rgb_data, space)
         if channels is None or len(channels) == 0:
             self.clear()
@@ -191,7 +188,6 @@ class SignalWindow(QMainWindow):
         n = len(self._rgb_data)
         fps = self._fps
 
-        # 2. FFT для каждого канала
         window = np.hanning(n)
         freqs = np.fft.rfftfreq(n, d=1.0 / fps)
 
@@ -207,7 +203,6 @@ class SignalWindow(QMainWindow):
             freqs = freqs[1:]
             spectra = [s[1:] for s in spectra]
 
-        # 3. Обновляем кривые
         for i, curve in enumerate(self._curves):
             if i < len(spectra):
                 curve.setData(freqs, spectra[i])
@@ -217,9 +212,10 @@ class SignalWindow(QMainWindow):
         self._fft_plot.setTitle(f"FFT-спектр ({space})")
         self._fft_plot.autoRange()
 
-        # 4. Пики по первому каналу
         self._clear_peaks()
         peaks = self._find_peaks(freqs, spectra[0], self.MAX_PEAKS) if spectra else []
+        self._current_peaks = [p[0] for p in peaks]
+
         for freq, amp in peaks:
             label = pg.TextItem(
                 text=f"{freq:.2f} Hz",
@@ -230,7 +226,6 @@ class SignalWindow(QMainWindow):
             self._fft_plot.addItem(label)
             self._peak_labels.append(label)
 
-        # 5. Инфо
         duration = n / fps
         info = (
             f"Видео: {self._video_name}   Пространство: {space}   "
@@ -242,21 +237,11 @@ class SignalWindow(QMainWindow):
 
     # ==================== КОНВЕРТАЦИЯ ====================
 
-    def _get_channels(
-        self, rgb_data: np.ndarray, space: str,
-    ) -> tuple[list[np.ndarray] | None, list[str]]:
-        """Возвращает (список каналов, список меток)."""
+    def _get_channels(self, rgb_data: np.ndarray, space: str):
         if space == "RGB":
-            channels = [
-                rgb_data[:, 0],
-                rgb_data[:, 1],
-                rgb_data[:, 2],
-            ]
-            return channels, ["R", "G", "B"]
+            return [rgb_data[:, 0], rgb_data[:, 1], rgb_data[:, 2]], ["R", "G", "B"]
 
-        # cv2: RGB → другое пространство
         arr = rgb_data.reshape((-1, 1, 3)).astype(np.uint8)
-
         if space == "HSV":
             converted = cv2.cvtColor(arr, cv2.COLOR_RGB2HSV)
             labels = ["H", "S", "V"]
@@ -270,12 +255,7 @@ class SignalWindow(QMainWindow):
             return None, []
 
         converted = converted.reshape((-1, 3))
-        channels = [
-            converted[:, 0],
-            converted[:, 1],
-            converted[:, 2],
-        ]
-        return channels, labels
+        return [converted[:, 0], converted[:, 1], converted[:, 2]], labels
 
     # ==================== ПИКИ ====================
 
@@ -284,21 +264,38 @@ class SignalWindow(QMainWindow):
             self._fft_plot.removeItem(label)
         self._peak_labels.clear()
 
-    def _find_peaks(
-        self,
-        freqs: np.ndarray,
-        spectrum: np.ndarray,
-        max_peaks: int,
-    ) -> list[tuple[float, float]]:
+    def _find_peaks(self, freqs, spectrum, max_peaks):
         if len(spectrum) < 3:
             return []
-
         peaks = []
         for i in range(1, len(spectrum) - 1):
             if (spectrum[i] > spectrum[i - 1] and
                     spectrum[i] > spectrum[i + 1] and
                     spectrum[i] > spectrum.mean() * 2):
                 peaks.append((float(freqs[i]), float(spectrum[i])))
-
         peaks.sort(key=lambda x: -x[1])
         return peaks[:max_peaks]
+
+    # ==================== КАРТА МОЩНОСТИ ====================
+
+    def _show_power_map(self) -> None:
+        if not self._video_path:
+            self._info_label.setText("Нет пути к видео — карта недоступна")
+            return
+
+        from desktop.viewers.video.power_map import PowerMapWindow
+
+        if self._power_map_window is None:
+            self._power_map_window = PowerMapWindow(parent=self.window())
+
+        self._power_map_window.set_source(
+            video_path=self._video_path,
+            fps=self._fps,
+            video_size=self._video_size,
+            first_frame=self._first_frame,
+            peak_freqs=self._current_peaks,
+            roi=self._roi,
+        )
+        self._power_map_window.show()
+        self._power_map_window.raise_()
+        self._power_map_window.activateWindow()
