@@ -18,6 +18,8 @@ from desktop.window.toolbar import MainToolbar
 from desktop.window.tabs import MainTabs
 from desktop.window.project_actions import ProjectActions
 from desktop.window.state import WindowState
+from desktop.viewers import ViewerWindow
+from desktop.viewers.registry import ViewerRegistry
 
 
 class MainWindow(QMainWindow):
@@ -27,6 +29,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
 
         self.project: ProjectManager | None = None
+        self._viewer_windows: list[ViewerWindow] = []
 
         self.setWindowTitle("VideoLab")
         self.resize(1400, 900)
@@ -44,7 +47,6 @@ class MainWindow(QMainWindow):
 
         logger.subscribe(self._on_global_log)
 
-        # Esc — отмена активной обработки
         self._esc_shortcut = QShortcut(QKeySequence("Esc"), self)
         self._esc_shortcut.activated.connect(self._on_escape)
 
@@ -167,19 +169,42 @@ class MainWindow(QMainWindow):
         self.tree_panel.actions.run_with_progress(node_path, processor_class)
 
     def _on_file_double_clicked(self, file_path: str) -> None:
+        """Открывает просмотрщик для файла."""
         name = Path(file_path).name
-        self.log("INFO", f"Открытие файла: {name}")
-        QMessageBox.information(
-            self, "Просмотр файла",
-            f"Просмотрщик будет добавлен позже.\n\nФайл:\n{file_path}"
-        )
+
+        if ViewerRegistry.can_view(file_path):
+            try:
+                window = ViewerWindow(file_path, parent=self)
+                self._viewer_windows.append(window)
+                window.destroyed.connect(
+                    lambda: self._cleanup_viewer_window(window)
+                )
+                window.show()
+                self.log("INFO", f"Открыт просмотрщик: {name}")
+            except Exception as e:
+                self.log("ERROR", f"Ошибка открытия просмотрщика: {e}", exc_info=True)
+                QMessageBox.critical(
+                    self, "Ошибка",
+                    f"Не удалось открыть файл:\n{e}"
+                )
+        else:
+            self.log("INFO", f"Нет просмотрщика для файла: {name}")
+            QMessageBox.information(
+                self, "Просмотр файла",
+                f"Для этого типа файлов нет просмотрщика.\n\n"
+                f"Файл:\n{file_path}"
+            )
+
+    def _cleanup_viewer_window(self, window: ViewerWindow) -> None:
+        """Убирает ссылку на закрытое окно."""
+        if window in self._viewer_windows:
+            self._viewer_windows.remove(window)
 
     def _on_node_double_clicked(self, node_path: str) -> None:
         self.files_panel.load_path(node_path)
         self.settings_panel.load_node(node_path)
 
     def _on_escape(self) -> None:
-        """Esc — отмена активной обработки."""
         if self.tree_panel._current_context is not None:
             self.tree_panel.actions.cancel_processing()
 
@@ -214,6 +239,11 @@ class MainWindow(QMainWindow):
             if thread:
                 thread.quit()
                 thread.wait(3000)
+
+        # Закрываем все окна просмотра
+        for window in self._viewer_windows[:]:
+            window.close()
+        self._viewer_windows.clear()
 
         self.state.save()
         logger.unsubscribe(self._on_global_log)

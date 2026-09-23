@@ -1,0 +1,156 @@
+"""Панель управления видео."""
+from PySide6.QtWidgets import (
+    QWidget, QHBoxLayout, QPushButton, QSlider, QLabel, QStyle,
+)
+from PySide6.QtCore import Qt, Signal
+
+
+MEDIA_BUTTON_STYLE = """
+QPushButton {
+    background-color: #3a3a3d;
+    border: 1px solid #4a4a4d;
+    border-radius: 3px;
+    color: #d4d4d4;
+}
+
+QPushButton:hover {
+    background-color: #4a4a4e;
+    border: 1px solid #5a5a5e;
+}
+
+QPushButton:pressed {
+    background-color: #2a4a6a;
+    border: 1px solid #3a5a7a;
+}
+
+QPushButton:checked {
+    background-color: #0e639c;
+    border: 1px solid #1177bb;
+    color: #ffffff;
+}
+
+QPushButton:checked:hover {
+    background-color: #1177bb;
+    border: 1px solid #2a87cb;
+}
+
+QPushButton:disabled {
+    background-color: #2a2a2d;
+    border: 1px solid #3a3a3d;
+    color: #666666;
+}
+"""
+
+
+class VideoControls(QWidget):
+    """Панель управления: play/pause, stop, loop, seek."""
+
+    play_pause_clicked = Signal()
+    stop_clicked = Signal()
+    seek_requested = Signal(int)
+    loop_toggled = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self._is_playing = False
+        self._total_frames = 0
+        self._is_slider_dragging = False
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(6)
+
+        style = self.style()
+
+        btn_size = 36
+
+        # Play / Pause
+        self.btn_play = QPushButton()
+        self.btn_play.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
+        self.btn_play.setToolTip("Play / Pause (Space)")
+        self.btn_play.setFixedSize(btn_size, btn_size)
+        self.btn_play.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self.btn_play.clicked.connect(self.play_pause_clicked.emit)
+        layout.addWidget(self.btn_play)
+
+        # Stop
+        self.btn_stop = QPushButton()
+        self.btn_stop.setIcon(style.standardIcon(QStyle.SP_MediaStop))
+        self.btn_stop.setToolTip("Stop")
+        self.btn_stop.setFixedSize(btn_size, btn_size)
+        self.btn_stop.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self.btn_stop.clicked.connect(self.stop_clicked.emit)
+        layout.addWidget(self.btn_stop)
+
+        # Loop — иконка SP_BrowserReload (стрелка по кругу)
+        self.btn_loop = QPushButton()
+        self.btn_loop.setIcon(style.standardIcon(QStyle.SP_BrowserReload))
+        self.btn_loop.setCheckable(True)
+        self.btn_loop.setToolTip("Закольцевать воспроизведение")
+        self.btn_loop.setFixedSize(btn_size, btn_size)
+        self.btn_loop.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self.btn_loop.toggled.connect(self.loop_toggled.emit)
+        layout.addWidget(self.btn_loop)
+
+        # Текущий кадр / всего
+        self.label_frame = QLabel("0 / 0")
+        self.label_frame.setStyleSheet("padding: 0 4px;")
+        layout.addWidget(self.label_frame)
+
+        # Seek
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, 0)
+        self.slider.sliderPressed.connect(self._on_slider_pressed)
+        self.slider.sliderReleased.connect(self._on_slider_released)
+        self.slider.valueChanged.connect(self._on_slider_value_changed)
+        layout.addWidget(self.slider, stretch=1)
+
+    # ==================== API ====================
+
+    def set_total_frames(self, total: int) -> None:
+        self._total_frames = total
+        self.slider.setRange(0, max(0, total - 1))
+        self._update_frame_label(self.slider.value())
+
+    def set_current_frame(self, frame_index: int) -> None:
+        """frame_index — внутренний (0-based). В UI показываем 1-based."""
+        if self._is_slider_dragging:
+            return
+        self.slider.blockSignals(True)
+        self.slider.setValue(frame_index)
+        self.slider.blockSignals(False)
+        self._update_frame_label(frame_index)
+
+    def set_playing_state(self, is_playing: bool) -> None:
+        self._is_playing = is_playing
+        style = self.style()
+        if is_playing:
+            self.btn_play.setIcon(style.standardIcon(QStyle.SP_MediaPause))
+        else:
+            self.btn_play.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
+
+    def set_enabled_controls(self, enabled: bool) -> None:
+        self.btn_play.setEnabled(enabled)
+        self.btn_stop.setEnabled(enabled)
+        self.btn_loop.setEnabled(enabled)
+        self.slider.setEnabled(enabled)
+
+    # ==================== ВНУТРЕННИЕ ====================
+
+    def _update_frame_label(self, frame_index: int) -> None:
+        """frame_index — внутренний (0-based). Показываем 1-based."""
+        display = frame_index + 1 if self._total_frames > 0 else 0
+        self.label_frame.setText(f"{display} / {self._total_frames}")
+
+    def _on_slider_pressed(self) -> None:
+        self._is_slider_dragging = True
+
+    def _on_slider_released(self) -> None:
+        self._is_slider_dragging = False
+        self.seek_requested.emit(self.slider.value())
+
+    def _on_slider_value_changed(self, value: int) -> None:
+        self._update_frame_label(value)
+        if self._is_slider_dragging:
+            self.seek_requested.emit(value)
