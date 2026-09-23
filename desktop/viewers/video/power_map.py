@@ -17,6 +17,197 @@ from desktop.viewers.styles import (
 )
 
 
+# ==================== ВСТРОЕННЫЕ ПАЛИТРЫ ====================
+
+def _build_jet_colormap() -> np.ndarray:
+    """Собственная реализация Jet (256×3, uint8)."""
+    x = np.linspace(0, 1, 256)
+    r = np.clip(1.5 - np.abs(4 * x - 3), 0, 1)
+    g = np.clip(1.5 - np.abs(4 * x - 2), 0, 1)
+    b = np.clip(1.5 - np.abs(4 * x - 1), 0, 1)
+    return (np.stack([r, g, b], axis=-1) * 255).astype(np.uint8)
+
+
+def _build_turbo_colormap() -> np.ndarray:
+    """Приблизительная реализация Turbo (256×3, uint8)."""
+    x = np.linspace(0, 1, 256)
+    r = np.clip(0.13572138 + x * (4.61539260 + x * (-42.66032258 +
+                x * (132.13108234 + x * (-152.94239396 + x * 59.28637943)))), 0, 1)
+    g = np.clip(0.09140261 + x * (2.19418839 + x * (4.84296658 +
+                x * (-14.18503333 + x * (4.27729857 + x * 2.82956604)))), 0, 1)
+    b = np.clip(0.10667330 + x * (12.64194608 + x * (-60.58204836 +
+                x * (110.36276771 + x * (-89.90310912 + x * 27.34824973)))), 0, 1)
+    return (np.stack([r, g, b], axis=-1) * 255).astype(np.uint8)
+
+
+def _build_hot_colormap() -> np.ndarray:
+    """Реализация Hot (256×3)."""
+    x = np.linspace(0, 1, 256)
+    r = np.clip(x * 3, 0, 1)
+    g = np.clip(x * 3 - 1, 0, 1)
+    b = np.clip(x * 3 - 2, 0, 1)
+    return (np.stack([r, g, b], axis=-1) * 255).astype(np.uint8)
+
+
+def _build_viridis_colormap() -> np.ndarray:
+    """Приблизительная Viridis через линейную интерполяцию ключевых точек."""
+    # Ключевые цвета Viridis (из matplotlib)
+    points = [
+        (0.0, (68, 1, 84)),
+        (0.25, (59, 82, 139)),
+        (0.5, (33, 145, 140)),
+        (0.75, (94, 201, 98)),
+        (1.0, (253, 231, 37)),
+    ]
+    x = np.linspace(0, 1, 256)
+    result = np.zeros((256, 3), dtype=np.float32)
+    for i in range(len(points) - 1):
+        x0, c0 = points[i]
+        x1, c1 = points[i + 1]
+        mask = (x >= x0) & (x <= x1)
+        t = (x[mask] - x0) / (x1 - x0)
+        for ch in range(3):
+            result[mask, ch] = c0[ch] + t * (c1[ch] - c0[ch])
+    return result.astype(np.uint8)
+
+
+def _build_plasma_colormap() -> np.ndarray:
+    points = [
+        (0.0, (13, 8, 135)),
+        (0.25, (126, 3, 168)),
+        (0.5, (204, 71, 120)),
+        (0.75, (248, 149, 64)),
+        (1.0, (240, 249, 33)),
+    ]
+    x = np.linspace(0, 1, 256)
+    result = np.zeros((256, 3), dtype=np.float32)
+    for i in range(len(points) - 1):
+        x0, c0 = points[i]
+        x1, c1 = points[i + 1]
+        mask = (x >= x0) & (x <= x1)
+        t = (x[mask] - x0) / (x1 - x0)
+        for ch in range(3):
+            result[mask, ch] = c0[ch] + t * (c1[ch] - c0[ch])
+    return result.astype(np.uint8)
+
+
+def _build_inferno_colormap() -> np.ndarray:
+    points = [
+        (0.0, (0, 0, 4)),
+        (0.25, (87, 16, 110)),
+        (0.5, (188, 55, 84)),
+        (0.75, (249, 142, 9)),
+        (1.0, (252, 255, 164)),
+    ]
+    x = np.linspace(0, 1, 256)
+    result = np.zeros((256, 3), dtype=np.float32)
+    for i in range(len(points) - 1):
+        x0, c0 = points[i]
+        x1, c1 = points[i + 1]
+        mask = (x >= x0) & (x <= x1)
+        t = (x[mask] - x0) / (x1 - x0)
+        for ch in range(3):
+            result[mask, ch] = c0[ch] + t * (c1[ch] - c0[ch])
+    return result.astype(np.uint8)
+
+
+# Реестр палитр
+COLORMAPS = {
+    "Turbo": _build_turbo_colormap,
+    "Jet": _build_jet_colormap,
+    "Hot": _build_hot_colormap,
+    "Viridis": _build_viridis_colormap,
+    "Plasma": _build_plasma_colormap,
+    "Inferno": _build_inferno_colormap,
+}
+
+# Кэш построенных таблиц
+_COLORMAP_CACHE: dict[str, np.ndarray] = {}
+
+
+def get_colormap_lut(name: str) -> np.ndarray:
+    """Возвращает LUT (256×3, uint8) для указанной палитры."""
+    if name not in _COLORMAP_CACHE:
+        builder = COLORMAPS.get(name, _build_turbo_colormap)
+        _COLORMAP_CACHE[name] = builder()
+    return _COLORMAP_CACHE[name]
+
+
+# ==================== ЦВЕТОВАЯ ШКАЛА ====================
+
+class ColorbarWidget(QWidget):
+    """Вертикальная цветовая шкала с подписями."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self._colormap_name = "Turbo"
+        self._value_min = 0.0
+        self._value_max = 1.0
+
+        self.setFixedWidth(80)
+
+    def set_colormap(self, name: str) -> None:
+        self._colormap_name = name
+        self.update()
+
+    def set_range(self, vmin: float, vmax: float) -> None:
+        self._value_min = vmin
+        self._value_max = vmax
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.fillRect(self.rect(), QColor(HISTOGRAM_BG))
+
+        bar_w = 24
+        bar_x = 8
+        bar_y = 16
+        bar_h = self.height() - 40
+
+        if bar_h <= 0:
+            painter.end()
+            return
+
+        colors = get_colormap_lut(self._colormap_name)
+
+        # Рисуем шкалу: сверху максимум, снизу минимум
+        for i in range(bar_h):
+            ratio = 1.0 - i / bar_h
+            color_idx = int(ratio * 255)
+            r, g, b = colors[color_idx]
+            painter.setPen(QColor(int(r), int(g), int(b)))
+            painter.drawLine(bar_x, bar_y + i, bar_x + bar_w, bar_y + i)
+
+        # Рамка
+        painter.setPen(QPen(QColor(HISTOGRAM_AXIS), 1))
+        painter.drawRect(bar_x, bar_y, bar_w, bar_h)
+
+        # Подписи
+        font = QFont()
+        font.setPointSize(7)
+        painter.setFont(font)
+        painter.setPen(QPen(QColor(HISTOGRAM_AXIS)))
+
+        n_labels = 5
+        for i in range(n_labels):
+            ratio = 1.0 - i / (n_labels - 1)
+            y = bar_y + int(i * bar_h / (n_labels - 1))
+            value = self._value_min + ratio * (self._value_max - self._value_min)
+            text = f"{value:.2f}"
+            painter.drawText(
+                bar_x + bar_w + 4, y - 7,
+                self.width() - bar_w - 12, 14,
+                Qt.AlignLeft | Qt.AlignVCenter,
+                text,
+            )
+
+        painter.end()
+
+
+# ==================== КАРТА ====================
+
 class PowerMapCanvas(QWidget):
     """Виджет отрисовки карты мощности."""
 
@@ -29,14 +220,30 @@ class PowerMapCanvas(QWidget):
         self._background: np.ndarray | None = None
         self._alpha: float = 0.7
         self._marker_xy: tuple[int, int] | None = None
+        self._colormap_name: str = "Turbo"
+
+        self._raw_min: float = 0.0
+        self._raw_max: float = 1.0
 
         self.setMinimumSize(480, 360)
         self.setStyleSheet(f"background-color: {HISTOGRAM_BG};")
         self.setMouseTracking(True)
 
-    def set_map(self, map_data: np.ndarray, background: np.ndarray | None) -> None:
+    def set_colormap(self, name: str) -> None:
+        self._colormap_name = name
+        self.update()
+
+    def set_map(
+        self,
+        map_data: np.ndarray,
+        background: np.ndarray | None,
+        raw_min: float,
+        raw_max: float,
+    ) -> None:
         self._map = map_data
         self._background = background
+        self._raw_min = raw_min
+        self._raw_max = raw_max
         self._marker_xy = None
         self.update()
 
@@ -49,7 +256,8 @@ class PowerMapCanvas(QWidget):
     def get_map(self) -> np.ndarray | None:
         return self._map
 
-    # ==================== ГЕОМЕТРИЯ ====================
+    def get_raw_range(self) -> tuple[float, float]:
+        return self._raw_min, self._raw_max
 
     def _display_rect(self) -> QRect | None:
         if self._map is None:
@@ -89,20 +297,13 @@ class PowerMapCanvas(QWidget):
         my = max(0, min(my, h - 1))
         return (mx, my)
 
-    # ==================== РИСОВАНИЕ ====================
-
     def _build_display_pixmap(self) -> QPixmap | None:
         if self._map is None:
             return None
 
         h, w = self._map.shape
 
-        try:
-            colormap = pg.colormap.get("viridis")
-        except Exception:
-            colormap = pg.colormap.get("viridis", source="matplotlib")
-
-        colors = colormap.getLookupTable(nPts=256, alpha=False)
+        colors = get_colormap_lut(self._colormap_name)
 
         m = self._map
         m_min = float(m.min())
@@ -166,8 +367,6 @@ class PowerMapCanvas(QWidget):
 
         painter.end()
 
-    # ==================== СОБЫТИЯ ====================
-
     def mousePressEvent(self, event):
         if self._map is None:
             return
@@ -186,6 +385,8 @@ class PowerMapCanvas(QWidget):
             parent._on_canvas_clicked(pos[0], pos[1], value)
 
 
+# ==================== ОКНО ====================
+
 class PowerMapWindow(QMainWindow):
     """Отдельное окно: карта мощности сигнала на частоте (внутри ROI)."""
 
@@ -193,7 +394,7 @@ class PowerMapWindow(QMainWindow):
         super().__init__(parent)
 
         self.setWindowTitle("Карта мощности")
-        self.resize(900, 650)
+        self.resize(1000, 650)
 
         self._video_path: str = ""
         self._fps: float = 0.0
@@ -201,7 +402,6 @@ class PowerMapWindow(QMainWindow):
         self._first_frame: np.ndarray | None = None
         self._peak_freqs: list[float] = []
 
-        # ROI (x, y, w, h) или None (всё изображение)
         self._roi: tuple[int, int, int, int] | None = None
 
         container = QWidget()
@@ -254,6 +454,15 @@ class PowerMapWindow(QMainWindow):
         top.addWidget(self.btn_compute)
 
         top.addStretch()
+
+        top.addWidget(QLabel("Палитра:"))
+        self.combo_colormap = QComboBox()
+        self.combo_colormap.setFixedWidth(90)
+        self.combo_colormap.addItems(list(COLORMAPS.keys()))
+        self.combo_colormap.setCurrentText("Turbo")
+        self.combo_colormap.currentTextChanged.connect(self._on_colormap_changed)
+        top.addWidget(self.combo_colormap)
+
         layout.addLayout(top)
 
         # ==================== ИНФО ====================
@@ -264,10 +473,18 @@ class PowerMapWindow(QMainWindow):
         )
         layout.addWidget(self._info_label)
 
-        # ==================== КАРТА ====================
+        # ==================== КАРТА + COLORBAR ====================
+
+        map_row = QHBoxLayout()
+        map_row.setSpacing(4)
 
         self._canvas = PowerMapCanvas()
-        layout.addWidget(self._canvas, stretch=1)
+        map_row.addWidget(self._canvas, stretch=1)
+
+        self._colorbar = ColorbarWidget()
+        map_row.addWidget(self._colorbar)
+
+        layout.addLayout(map_row, stretch=1)
 
         # ==================== КНОПКИ СНИЗУ ====================
 
@@ -285,6 +502,7 @@ class PowerMapWindow(QMainWindow):
         self.setCentralWidget(container)
 
         self._update_labels()
+        self._colorbar.set_colormap("Turbo")
 
     # ==================== API ====================
 
@@ -336,6 +554,10 @@ class PowerMapWindow(QMainWindow):
         self.combo_channel.clear()
         self.combo_channel.addItems(maps.get(space, ["R", "G", "B"]))
 
+    def _on_colormap_changed(self, name: str) -> None:
+        self._canvas.set_colormap(name)
+        self._colorbar.set_colormap(name)
+
     # ==================== РАСЧЁТ ====================
 
     def _compute_map(self) -> None:
@@ -358,7 +580,6 @@ class PowerMapWindow(QMainWindow):
         if fps <= 0:
             fps = 30.0
 
-        # Определяем ROI (или всё изображение)
         vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         vid_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
@@ -367,7 +588,6 @@ class PowerMapWindow(QMainWindow):
         else:
             rx, ry, rw, rh = 0, 0, vid_w, vid_h
 
-        # Клампим к границам
         rx = max(0, min(rx, vid_w - 1))
         ry = max(0, min(ry, vid_h - 1))
         rw = min(rw, vid_w - rx)
@@ -401,13 +621,9 @@ class PowerMapWindow(QMainWindow):
                     progress.close()
                     return
 
-            # Обрезаем кадр по ROI
             frame_crop = frame[ry:ry + rh, rx:rx + rw]
-
-            # BGR → RGB
             frame_rgb = cv2.cvtColor(frame_crop, cv2.COLOR_BGR2RGB)
 
-            # Выбираем канал
             if space == "RGB":
                 ch = frame_rgb[:, :, channel_idx]
             else:
@@ -432,24 +648,18 @@ class PowerMapWindow(QMainWindow):
             QMessageBox.warning(self, "Ошибка", "Слишком мало кадров")
             return
 
-        # Стек: (N, H_roi, W_roi)
         data = np.stack(frames, axis=0).astype(np.float32)
         n = data.shape[0]
 
-        # Убираем DC
         data = data - data.mean(axis=0, keepdims=True)
-
-        # Hann по времени
         window = np.hanning(n).astype(np.float32)
         data = data * window[:, None, None]
 
-        # FFT по времени
         spectrum = np.fft.rfft(data, axis=0)
         magnitude = np.abs(spectrum)
 
         freqs = np.fft.rfftfreq(n, d=1.0 / fps)
 
-        # Диапазон частот
         if freq_width > 0:
             mask = (freqs >= target_freq - freq_width) & (freqs <= target_freq + freq_width)
         else:
@@ -462,15 +672,14 @@ class PowerMapWindow(QMainWindow):
         else:
             magnitude_at_freq = magnitude[mask].mean(axis=0)
 
-        # Нормализация
         mag_min = float(magnitude_at_freq.min())
         mag_max = float(magnitude_at_freq.max())
+
         if mag_max > mag_min:
             normalized = (magnitude_at_freq - mag_min) / (mag_max - mag_min)
         else:
             normalized = magnitude_at_freq * 0.0
 
-        # Фон — обрезанный первый кадр
         background = None
         if self._first_frame is not None:
             fh, fw = self._first_frame.shape[:2]
@@ -487,14 +696,19 @@ class PowerMapWindow(QMainWindow):
                 frame_crop = frame[ry:ry + rh, rx:rx + rw]
                 background = cv2.cvtColor(frame_crop, cv2.COLOR_BGR2RGB)
 
-        self._canvas.set_map(normalized, background)
+        self._canvas.set_map(normalized, background, mag_min, mag_max)
+
+        self._colorbar.set_colormap(self.combo_colormap.currentText())
+        self._colorbar.set_range(mag_min, mag_max)
+
         self.btn_save.setEnabled(True)
 
         info = (
             f"ROI: ({rx}, {ry}) {rw}x{rh}   "
             f"Частота: {target_freq:.2f} ± {freq_width:.2f} Гц   "
             f"Канал: {space} / {self.combo_channel.currentText()}   "
-            f"Кадров: {n}   Max: {mag_max:.2f}"
+            f"Кадров: {n}   "
+            f"Max: {mag_max:.2f}   Min: {mag_min:.2f}"
         )
         self._info_label.setText(info)
 
@@ -516,7 +730,9 @@ class PowerMapWindow(QMainWindow):
         pixmap.save(path, "PNG")
 
     def _on_canvas_clicked(self, x: int, y: int, value: float) -> None:
-        # x, y — координаты внутри ROI
+        raw_min, raw_max = self._canvas.get_raw_range()
+        absolute_value = raw_min + value * (raw_max - raw_min)
+
         if self._roi is not None:
             rx, ry, _, _ = self._roi
             abs_x = rx + x
@@ -526,6 +742,6 @@ class PowerMapWindow(QMainWindow):
 
         self._info_label.setText(
             f"ROI-локальные: ({x}, {y})   Абсолютные: ({abs_x}, {abs_y})   "
-            f"Значение: {value:.4f}   "
+            f"Мощность: {absolute_value:.4f}   "
             f"Частота: {self.spin_freq.value():.2f} Гц"
         )
