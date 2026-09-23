@@ -43,6 +43,39 @@ QPushButton:disabled {
 """
 
 
+# ==================== SEEK SLIDER (горизонтальный) ====================
+
+SEEK_SLIDER_STYLE = """
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #3a3a3d;
+    border-radius: 3px;
+}
+
+QSlider::sub-page:horizontal {
+    background: #0e639c;
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    background: #1177bb;
+    border: 1px solid #ffffff;
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 8px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #2a87cb;
+}
+
+QSlider::handle:horizontal:pressed {
+    background: #2a87cb;
+}
+"""
+
+
 # ==================== ВИДЕО ====================
 
 VIDEO_SURFACE_STYLE = """

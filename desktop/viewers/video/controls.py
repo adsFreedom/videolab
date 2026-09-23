@@ -4,11 +4,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from desktop.viewers.styles import MEDIA_BUTTON_STYLE
+from desktop.viewers.styles import MEDIA_BUTTON_STYLE, SEEK_SLIDER_STYLE
 
 
 class VideoControls(QWidget):
-    """Панель управления: play/pause, stop, loop, seek."""
+    """Панель управления: play/pause, stop, seek, loop."""
 
     play_pause_clicked = Signal()
     stop_clicked = Signal()
@@ -47,16 +47,6 @@ class VideoControls(QWidget):
         self.btn_stop.clicked.connect(self.stop_clicked.emit)
         layout.addWidget(self.btn_stop)
 
-        # Loop
-        self.btn_loop = QPushButton()
-        self.btn_loop.setIcon(style.standardIcon(QStyle.SP_BrowserReload))
-        self.btn_loop.setCheckable(True)
-        self.btn_loop.setToolTip("Закольцевать воспроизведение")
-        self.btn_loop.setFixedSize(btn_size, btn_size)
-        self.btn_loop.setStyleSheet(MEDIA_BUTTON_STYLE)
-        self.btn_loop.toggled.connect(self.loop_toggled.emit)
-        layout.addWidget(self.btn_loop)
-
         # Текущий кадр / всего
         self.label_frame = QLabel("0 / 0")
         self.label_frame.setStyleSheet("padding: 0 4px;")
@@ -65,10 +55,22 @@ class VideoControls(QWidget):
         # Seek
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, 0)
+        self.slider.setFixedHeight(24)
+        self.slider.setStyleSheet(SEEK_SLIDER_STYLE)
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
         self.slider.valueChanged.connect(self._on_slider_value_changed)
         layout.addWidget(self.slider, stretch=1)
+
+        # Loop — справа от слайдера
+        self.btn_loop = QPushButton()
+        self.btn_loop.setIcon(style.standardIcon(QStyle.SP_BrowserReload))
+        self.btn_loop.setCheckable(True)
+        self.btn_loop.setToolTip("Закольцевать воспроизведение")
+        self.btn_loop.setFixedSize(btn_size, btn_size)
+        self.btn_loop.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self.btn_loop.toggled.connect(self.loop_toggled.emit)
+        layout.addWidget(self.btn_loop)
 
     # ==================== API ====================
 

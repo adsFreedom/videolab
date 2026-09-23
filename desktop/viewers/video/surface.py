@@ -25,7 +25,7 @@ class VideoSurface(QWidget):
         self.setMinimumSize(320, 240)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setStyleSheet(VIDEO_SURFACE_STYLE)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CrossCursor)
 
     def set_frame(self, frame: np.ndarray | None) -> None:
         self._frame = frame
