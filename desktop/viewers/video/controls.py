@@ -11,13 +11,14 @@ from desktop.viewers.styles import (
 
 
 class VideoControls(QWidget):
-    """Панель управления: play/pause, stop, loop, seek, mark pixel."""
+    """Панель управления: play/pause, stop, loop, seek, mark pixel, mark ROI."""
 
     play_pause_clicked = Signal()
     stop_clicked = Signal()
     seek_requested = Signal(int)
     loop_toggled = Signal(bool)
     mark_pixel_toggled = Signal(bool)
+    mark_roi_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,7 +33,7 @@ class VideoControls(QWidget):
 
         btn_size = 36
 
-        # Play / Pause
+        # Play
         self.btn_play = QPushButton("▶")
         self.btn_play.setToolTip("Play / Pause (Space)")
         self.btn_play.setFixedSize(btn_size, btn_size)
@@ -48,7 +49,7 @@ class VideoControls(QWidget):
         self.btn_stop.clicked.connect(self.stop_clicked.emit)
         layout.addWidget(self.btn_stop)
 
-        # Текущий кадр / всего
+        # Frame label
         self.label_frame = QLabel("0 / 0")
         self.label_frame.setStyleSheet("padding: 0 4px;")
         layout.addWidget(self.label_frame)
@@ -69,8 +70,17 @@ class VideoControls(QWidget):
         self.btn_mark.setCheckable(True)
         self.btn_mark.setFixedSize(btn_size, btn_size)
         self.btn_mark.setStyleSheet(SYMBOL_BUTTON_STYLE)
-        self.btn_mark.toggled.connect(self.mark_pixel_toggled.emit)
+        self.btn_mark.toggled.connect(self._on_mark_pixel_toggled)
         layout.addWidget(self.btn_mark)
+
+        # Mark ROI
+        self.btn_roi = QPushButton("▭")
+        self.btn_roi.setToolTip("Выделить область для анализа")
+        self.btn_roi.setCheckable(True)
+        self.btn_roi.setFixedSize(btn_size, btn_size)
+        self.btn_roi.setStyleSheet(SYMBOL_BUTTON_STYLE)
+        self.btn_roi.toggled.connect(self._on_mark_roi_toggled)
+        layout.addWidget(self.btn_roi)
 
         # Loop
         self.btn_loop = QPushButton("↻")
@@ -108,6 +118,7 @@ class VideoControls(QWidget):
         self.btn_stop.setEnabled(enabled)
         self.btn_loop.setEnabled(enabled)
         self.btn_mark.setEnabled(enabled)
+        self.btn_roi.setEnabled(enabled)
         self.slider.setEnabled(enabled)
 
     def set_mark_checked(self, checked: bool) -> None:
@@ -115,7 +126,29 @@ class VideoControls(QWidget):
         self.btn_mark.setChecked(checked)
         self.btn_mark.blockSignals(False)
 
+    def set_roi_checked(self, checked: bool) -> None:
+        self.btn_roi.blockSignals(True)
+        self.btn_roi.setChecked(checked)
+        self.btn_roi.blockSignals(False)
+
+    def uncheck_other_tools(self, active: str) -> None:
+        """Снимает галочки с других инструментов, кроме активного."""
+        if active != "pixel" and self.btn_mark.isChecked():
+            self.set_mark_checked(False)
+        if active != "roi" and self.btn_roi.isChecked():
+            self.set_roi_checked(False)
+
     # ==================== ВНУТРЕННИЕ ====================
+
+    def _on_mark_pixel_toggled(self, checked: bool) -> None:
+        if checked:
+            self.uncheck_other_tools("pixel")
+        self.mark_pixel_toggled.emit(checked)
+
+    def _on_mark_roi_toggled(self, checked: bool) -> None:
+        if checked:
+            self.uncheck_other_tools("roi")
+        self.mark_roi_toggled.emit(checked)
 
     def _update_frame_label(self, frame_index: int) -> None:
         display = frame_index + 1 if self._total_frames > 0 else 0
