@@ -1,6 +1,6 @@
 """Панель управления видео."""
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QPushButton, QSlider, QLabel, QStyle,
+    QWidget, QHBoxLayout, QPushButton, QSlider, QLabel,
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -8,7 +8,7 @@ from desktop.viewers.styles import MEDIA_BUTTON_STYLE, SEEK_SLIDER_STYLE
 
 
 class VideoControls(QWidget):
-    """Панель управления: play/pause, stop, seek, loop."""
+    """Панель управления: play/pause, stop, loop, seek."""
 
     play_pause_clicked = Signal()
     stop_clicked = Signal()
@@ -26,24 +26,21 @@ class VideoControls(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
 
-        style = self.style()
         btn_size = 36
 
-        # Play / Pause
-        self.btn_play = QPushButton()
-        self.btn_play.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
+        # Play / Pause — символ
+        self.btn_play = QPushButton("▶")
         self.btn_play.setToolTip("Play / Pause (Space)")
         self.btn_play.setFixedSize(btn_size, btn_size)
-        self.btn_play.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self.btn_play.setStyleSheet(MEDIA_BUTTON_STYLE + "\nfont-size: 14pt;")
         self.btn_play.clicked.connect(self.play_pause_clicked.emit)
         layout.addWidget(self.btn_play)
 
-        # Stop
-        self.btn_stop = QPushButton()
-        self.btn_stop.setIcon(style.standardIcon(QStyle.SP_MediaStop))
+        # Stop — символ
+        self.btn_stop = QPushButton("■")
         self.btn_stop.setToolTip("Stop")
         self.btn_stop.setFixedSize(btn_size, btn_size)
-        self.btn_stop.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self.btn_stop.setStyleSheet(MEDIA_BUTTON_STYLE + "\nfont-size: 14pt;")
         self.btn_stop.clicked.connect(self.stop_clicked.emit)
         layout.addWidget(self.btn_stop)
 
@@ -62,13 +59,12 @@ class VideoControls(QWidget):
         self.slider.valueChanged.connect(self._on_slider_value_changed)
         layout.addWidget(self.slider, stretch=1)
 
-        # Loop — справа от слайдера
-        self.btn_loop = QPushButton()
-        self.btn_loop.setIcon(style.standardIcon(QStyle.SP_BrowserReload))
+        # Loop — символ
+        self.btn_loop = QPushButton("↻")
         self.btn_loop.setCheckable(True)
         self.btn_loop.setToolTip("Закольцевать воспроизведение")
         self.btn_loop.setFixedSize(btn_size, btn_size)
-        self.btn_loop.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self.btn_loop.setStyleSheet(MEDIA_BUTTON_STYLE + "\nfont-size: 14pt;")
         self.btn_loop.toggled.connect(self.loop_toggled.emit)
         layout.addWidget(self.btn_loop)
 
@@ -89,11 +85,10 @@ class VideoControls(QWidget):
 
     def set_playing_state(self, is_playing: bool) -> None:
         self._is_playing = is_playing
-        style = self.style()
         if is_playing:
-            self.btn_play.setIcon(style.standardIcon(QStyle.SP_MediaPause))
+            self.btn_play.setText("⏸")
         else:
-            self.btn_play.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
+            self.btn_play.setText("▶")
 
     def set_enabled_controls(self, enabled: bool) -> None:
         self.btn_play.setEnabled(enabled)

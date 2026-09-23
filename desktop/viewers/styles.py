@@ -106,6 +106,28 @@ QLabel {
 """
 
 
+# ==================== ИЗОБРАЖЕНИЕ ====================
+
+IMAGE_SURFACE_STYLE = """
+QWidget {
+    background-color: #1a1a1a;
+}
+"""
+
+
+IMAGE_FRAME_STYLE = """
+QFrame#ImageFrame {
+    border: 2px solid #3e4a5a;
+    border-radius: 4px;
+    background-color: #0d0d0d;
+}
+"""
+
+
+IMAGE_SELECTION_COLOR = "#4fc1ff"
+IMAGE_SELECTION_WIDTH = 2
+
+
 # ==================== PIXEL INFO ====================
 
 PIXEL_COORD_LABEL_STYLE = """
@@ -149,3 +171,16 @@ color: #808080;
 
 TICK_COLOR = "#666666"
 TICK_LABEL_COLOR = "#a0a0a0"
+
+
+# ==================== ГИСТОГРАММА ====================
+
+HISTOGRAM_BG = "#1e1e1e"
+HISTOGRAM_GRID = "#3e3e42"
+HISTOGRAM_AXIS = "#808080"
+
+HISTOGRAM_COLOR_R = "#ff5555"
+HISTOGRAM_COLOR_G = "#55ff55"
+HISTOGRAM_COLOR_B = "#5599ff"
+HISTOGRAM_COLOR_Y = "#ffffff"
+HISTOGRAM_COLOR_GRAY = "#cccccc"

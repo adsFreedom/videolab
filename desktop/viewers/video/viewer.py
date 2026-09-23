@@ -12,7 +12,7 @@ from desktop.viewers.video.source import VideoSource
 from desktop.viewers.video.surface import VideoSurface
 from desktop.viewers.video.controls import VideoControls
 from desktop.viewers.video.overlay import OverlayWidget
-from desktop.viewers.video.pixel_info import PixelInfoWidget
+from desktop.viewers.pixel_info import PixelInfoWidget
 from desktop.viewers.video.speed_slider import SpeedSlider
 
 
