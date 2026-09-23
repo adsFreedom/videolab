@@ -1,19 +1,23 @@
 """Просмотрщик видео — композиция кирпичей."""
+import numpy as np
+import cv2
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QMessageBox, QProgressDialog,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QPoint
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from core.logger import log
 from desktop.viewers.base import BaseViewer
+from desktop.viewers.pixel_info import PixelInfoWidget
 from desktop.viewers.styles import VIDEO_FRAME_STYLE
 from desktop.viewers.video.source import VideoSource
 from desktop.viewers.video.surface import VideoSurface
 from desktop.viewers.video.controls import VideoControls
 from desktop.viewers.video.overlay import OverlayWidget
-from desktop.viewers.pixel_info import PixelInfoWidget
 from desktop.viewers.video.speed_slider import SpeedSlider
+from desktop.viewers.video.pixel_marker import PixelMarkerOverlay
+from desktop.viewers.video.signal_window import SignalWindow
 
 
 class VideoViewer(BaseViewer):
@@ -30,6 +34,10 @@ class VideoViewer(BaseViewer):
         self._is_playing = False
         self._loop = False
 
+        self._marked_pixel: tuple[int, int] | None = None
+        self._signal_window: SignalWindow | None = None
+
+        # --- Компоновка ---
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -54,13 +62,20 @@ class VideoViewer(BaseViewer):
         self._surface.pixel_hovered.connect(self._on_pixel_hovered)
         self._surface.mouse_left.connect(self._on_mouse_left)
         self._surface.clicked.connect(self._on_surface_clicked)
+        self._surface.pixel_marked.connect(self._on_pixel_marked)
         frame_layout.addWidget(self._surface)
 
         left_layout.addWidget(self._surface_frame, stretch=1)
 
+        # Overlay (время, кадр, fps)
         self._overlay = OverlayWidget(self._surface)
         self._overlay.move(10, 10)
         self._overlay.hide()
+
+        # Маркер пикселя
+        self._pixel_marker = PixelMarkerOverlay(self._surface)
+        self._pixel_marker.setGeometry(self._surface.rect())
+        self._pixel_marker.raise_()
 
         self._pixel_info = PixelInfoWidget()
         left_layout.addWidget(self._pixel_info)
@@ -78,10 +93,12 @@ class VideoViewer(BaseViewer):
         self._controls.stop_clicked.connect(self._on_stop)
         self._controls.seek_requested.connect(self._on_seek)
         self._controls.loop_toggled.connect(self._on_loop_toggled)
+        self._controls.mark_pixel_toggled.connect(self._on_mark_pixel_toggled)
         root.addWidget(self._controls)
 
         self._controls.set_enabled_controls(False)
 
+        # --- Горячие клавиши ---
         QShortcut(QKeySequence("Space"), self, self._on_play_pause,
                   context=Qt.ApplicationShortcut)
         QShortcut(QKeySequence("Left"), self, self._on_step_backward,
@@ -104,11 +121,9 @@ class VideoViewer(BaseViewer):
             return
 
         info = self._source.info
-        log(
-            "INFO",
+        log("INFO",
             f"Видео загружено: {info.frame_count} кадров, "
-            f"{info.fps:.2f} fps, {info.width}x{info.height}"
-        )
+            f"{info.fps:.2f} fps, {info.width}x{info.height}")
 
         self._controls.set_total_frames(info.frame_count)
         self._controls.set_current_frame(0)
@@ -124,6 +139,15 @@ class VideoViewer(BaseViewer):
         self._surface.clear()
         self._pixel_info.clear()
         self._overlay.hide()
+        self._pixel_marker.clear()
+        if self._signal_window is not None:
+            self._signal_window.close()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Обновляем размер маркера
+        if self._pixel_marker is not None:
+            self._pixel_marker.setGeometry(self._surface.rect())
 
     # ==================== УПРАВЛЕНИЕ ====================
 
@@ -139,6 +163,8 @@ class VideoViewer(BaseViewer):
             self._play()
 
     def _on_surface_clicked(self) -> None:
+        if self._surface.get_mode() == VideoSurface.MODE_MARK_PIXEL:
+            return  # клик по видео в режиме маркера — не play/pause
         if not self._source.is_open:
             return
         if self._is_playing:
@@ -213,14 +239,12 @@ class VideoViewer(BaseViewer):
     def _on_timer_tick(self) -> None:
         current = self._source.current_frame
         next_frame = current + 1
-
         if next_frame >= self._source.frame_count:
             if self._loop:
                 next_frame = 0
             else:
                 self._pause()
                 return
-
         self._render_frame(next_frame)
         self._controls.set_current_frame(next_frame)
 
@@ -230,17 +254,15 @@ class VideoViewer(BaseViewer):
         frame = self._source.get_frame(frame_index)
         if frame is None:
             return
-
         self._surface.set_frame(frame)
         self._update_overlay(frame_index)
+        self._update_pixel_marker_position()
 
     def _update_overlay(self, frame_index: int) -> None:
         info = self._source.info
         if info is None:
             return
-
         time_sec = frame_index / info.fps if info.fps > 0 else 0.0
-
         self._overlay.update_info(
             frame_index=frame_index,
             frame_count=info.frame_count,
@@ -251,6 +273,16 @@ class VideoViewer(BaseViewer):
             height=info.height,
         )
 
+    def _update_pixel_marker_position(self) -> None:
+        """Обновляем позицию маркера (например, при смене кадра)."""
+        if self._marked_pixel is None:
+            self._pixel_marker.clear()
+            return
+        img_x, img_y = self._marked_pixel
+        widget_pos = self._surface.image_to_widget_pos(img_x, img_y)
+        if widget_pos is not None:
+            self._pixel_marker.set_pixel(self._marked_pixel, widget_pos)
+
     # ==================== СОБЫТИЯ ====================
 
     def _on_pixel_hovered(self, x: int, y: int, rgb: tuple) -> None:
@@ -258,3 +290,102 @@ class VideoViewer(BaseViewer):
 
     def _on_mouse_left(self) -> None:
         self._pixel_info.clear()
+
+    # ==================== МАРКЕР ПИКСЕЛЯ ====================
+
+    def _on_mark_pixel_toggled(self, checked: bool) -> None:
+        """Пользователь нажал кнопку '⊕'."""
+        if checked:
+            self._surface.set_mode(VideoSurface.MODE_MARK_PIXEL)
+            log("INFO", "Режим: отметка пикселя")
+        else:
+            self._surface.set_mode(VideoSurface.MODE_PLAY_PAUSE)
+            # Убираем маркер, но окно сигнала оставляем
+            self._marked_pixel = None
+            self._pixel_marker.clear()
+            log("INFO", "Режим: воспроизведение")
+
+    def _on_pixel_marked(self, img_x: int, img_y: int, widget_pos: QPoint) -> None:
+        """Пользователь кликнул на видео в режиме отметки."""
+        self._marked_pixel = (img_x, img_y)
+        self._pixel_marker.set_pixel(self._marked_pixel, widget_pos)
+
+        log("INFO", f"Пиксель отмечен: ({img_x}, {img_y})")
+
+        # Запускаем сбор данных и открываем окно
+        self._collect_and_show_signal()
+
+    # ==================== СБОР СИГНАЛА ====================
+
+    def _collect_and_show_signal(self) -> None:
+        """Собирает RGB для отмеченного пикселя по всем кадрам и открывает окно."""
+        if self._marked_pixel is None or not self._source.is_open:
+            return
+
+        info = self._source.info
+        if info is None:
+            return
+
+        img_x, img_y = self._marked_pixel
+        video_path = self._source.file_path
+
+        # Прогресс
+        progress = QProgressDialog(
+            f"Сбор данных пикселя ({img_x}, {img_y})...",
+            "Отмена", 0, info.frame_count, self
+        )
+        progress.setWindowTitle("Сбор сигнала")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(200)
+
+        # Открываем видео заново через cv2 для быстрого прохода
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            progress.close()
+            QMessageBox.warning(self, "Ошибка", "Не удалось открыть видео")
+            return
+
+        values = []
+        frame_idx = 0
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_idx % 10 == 0:
+                progress.setValue(frame_idx)
+                if progress.wasCanceled():
+                    break
+
+            h, w = frame.shape[:2]
+            # Клампим
+            px = min(max(img_x, 0), w - 1)
+            py = min(max(img_y, 0), h - 1)
+
+            b, g, r = frame[py, px]
+            values.append((int(r), int(g), int(b)))
+
+            frame_idx += 1
+
+        cap.release()
+        progress.setValue(info.frame_count)
+        progress.close()
+
+        if not values:
+            QMessageBox.warning(self, "Ошибка", "Не удалось собрать данные")
+            return
+
+        rgb_data = np.array(values, dtype=np.uint8)
+
+        if self._signal_window is None:
+            self._signal_window = SignalWindow(parent=self.window())
+        self._signal_window.set_signal(
+            rgb_data=rgb_data,
+            fps=info.fps,
+            pixel_xy=(img_x, img_y),
+            video_name=self._source.file_name,
+        )
+        self._signal_window.show()
+        self._signal_window.raise_()
+        self._signal_window.activateWindow()

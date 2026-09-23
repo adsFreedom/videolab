@@ -4,16 +4,20 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from desktop.viewers.styles import SYMBOL_BUTTON_STYLE, SEEK_SLIDER_STYLE
+from desktop.viewers.styles import (
+    SYMBOL_BUTTON_STYLE,
+    SEEK_SLIDER_STYLE,
+)
 
 
 class VideoControls(QWidget):
-    """Панель управления: play/pause, stop, loop, seek."""
+    """Панель управления: play/pause, stop, loop, seek, mark pixel."""
 
     play_pause_clicked = Signal()
     stop_clicked = Signal()
     seek_requested = Signal(int)
     loop_toggled = Signal(bool)
+    mark_pixel_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -59,6 +63,15 @@ class VideoControls(QWidget):
         self.slider.valueChanged.connect(self._on_slider_value_changed)
         layout.addWidget(self.slider, stretch=1)
 
+        # Mark Pixel
+        self.btn_mark = QPushButton("⊕")
+        self.btn_mark.setToolTip("Отметить пиксель для анализа")
+        self.btn_mark.setCheckable(True)
+        self.btn_mark.setFixedSize(btn_size, btn_size)
+        self.btn_mark.setStyleSheet(SYMBOL_BUTTON_STYLE)
+        self.btn_mark.toggled.connect(self.mark_pixel_toggled.emit)
+        layout.addWidget(self.btn_mark)
+
         # Loop
         self.btn_loop = QPushButton("↻")
         self.btn_loop.setCheckable(True)
@@ -94,7 +107,13 @@ class VideoControls(QWidget):
         self.btn_play.setEnabled(enabled)
         self.btn_stop.setEnabled(enabled)
         self.btn_loop.setEnabled(enabled)
+        self.btn_mark.setEnabled(enabled)
         self.slider.setEnabled(enabled)
+
+    def set_mark_checked(self, checked: bool) -> None:
+        self.btn_mark.blockSignals(True)
+        self.btn_mark.setChecked(checked)
+        self.btn_mark.blockSignals(False)
 
     # ==================== ВНУТРЕННИЕ ====================
 

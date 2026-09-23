@@ -13,15 +13,11 @@ class VideoInfo:
     fps: float
     width: int
     height: int
-    duration: float   # секунды
+    duration: float
 
 
 class VideoSource:
-    """
-    Источник видео на базе cv2.VideoCapture.
-
-    Не использует Qt — можно тестировать без UI.
-    """
+    """Источник видео на базе cv2.VideoCapture."""
 
     def __init__(self):
         self._cap: cv2.VideoCapture | None = None
@@ -62,7 +58,6 @@ class VideoSource:
         return True
 
     def close(self) -> None:
-        """Освобождает ресурсы."""
         if self._cap is not None:
             self._cap.release()
             self._cap = None
@@ -78,6 +73,14 @@ class VideoSource:
     @property
     def is_open(self) -> bool:
         return self._cap is not None and self._cap.isOpened()
+
+    @property
+    def file_path(self) -> str:
+        return self._info.path if self._info else ""
+
+    @property
+    def file_name(self) -> str:
+        return Path(self._info.path).name if self._info else ""
 
     @property
     def frame_count(self) -> int:
@@ -106,19 +109,11 @@ class VideoSource:
     # ==================== ДОСТУП К КАДРАМ ====================
 
     def get_frame(self, frame_index: int) -> np.ndarray | None:
-        """
-        Возвращает кадр по индексу (BGR, как в OpenCV).
-        После получения — позиция остаётся на этом кадре.
-        """
+        """Возвращает кадр по индексу (BGR)."""
         if not self.is_open:
             return None
 
         frame_index = max(0, min(frame_index, self.frame_count - 1))
-
-        # Если уже на нужном кадре — не двигаем
-        if frame_index == self._current_frame:
-            # Перечитываем (чтобы гарантировать актуальность)
-            pass
 
         self._cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = self._cap.read()
@@ -130,10 +125,7 @@ class VideoSource:
         return frame
 
     def get_pixel(self, frame: np.ndarray, x: int, y: int) -> tuple[int, int, int]:
-        """
-        Возвращает (r, g, b) пикселя в кадре.
-        OpenCV хранит BGR — переводим в RGB.
-        """
+        """Возвращает (r, g, b) пикселя в кадре."""
         if frame is None:
             return (0, 0, 0)
 
