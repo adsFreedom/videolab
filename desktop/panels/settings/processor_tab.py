@@ -58,7 +58,6 @@ class ProcessorTab(QWidget):
         self.project = project
 
     def set_processing_state(self, is_processing: bool) -> None:
-        """Блокирует кнопку 'Применить' на время обработки."""
         self.btn_apply.setEnabled(not is_processing)
 
     def load_node(self, node_path: str, node_data: dict) -> None:
@@ -78,10 +77,14 @@ class ProcessorTab(QWidget):
             self.btn_apply.setEnabled(False)
             return
 
+        # === Логика выбора настроек ===
+        # Всегда показываем текущие settings (то, что пользователь видит и может менять).
+        # Если settings пуст — берём defaults из процессора.
         settings_to_show = node_data.get("settings", {})
-        has_snapshot = "settings_snapshot" in node_data
-        if not has_snapshot:
+        if not settings_to_show:
             settings_to_show = processor_class().get_default_settings()
+
+        has_snapshot = "settings_snapshot" in node_data
 
         if processor_class.settings_schema:
             self.schema_form = SchemaForm(processor_class.settings_schema)
