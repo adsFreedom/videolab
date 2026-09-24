@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
         self.files_panel = FilesPanel()
 
         self.files_panel.file_double_clicked.connect(self._on_file_double_clicked)
-        self.files_panel.node_double_clicked.connect(self._on_node_double_clicked)
+        self.files_panel.node_entered.connect(self._on_node_entered)
         self.settings_panel.node_updated.connect(self._on_node_updated)
         self.settings_panel.run_requested.connect(self._on_run_requested)
 
@@ -200,8 +200,10 @@ class MainWindow(QMainWindow):
         if window in self._viewer_windows:
             self._viewer_windows.remove(window)
 
-    def _on_node_double_clicked(self, node_path: str) -> None:
-        self.files_panel.load_path(node_path)
+    def _on_node_entered(self, node_path: str) -> None:
+        """Пользователь зашёл в папку-узел из списка файлов."""
+        if self.project:
+            self.settings_panel.set_project(self.project)
         self.settings_panel.load_node(node_path)
 
     def _on_escape(self) -> None:
