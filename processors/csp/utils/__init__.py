@@ -1,5 +1,5 @@
 """Утилиты CSP + YIQ."""
-from processors.csp.utils.yiq import (
+from utils.color_conversions import (
     rgb_to_yiq,
     yiq_to_rgb,
     split_yiq,

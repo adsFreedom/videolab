@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+from utils.color_conversions import rgb_to_yiq, convert_rgb, get_channel_names
 from desktop.viewers.styles import (
     HISTOGRAM_BG,
     HISTOGRAM_COLOR_R,
@@ -37,8 +38,6 @@ class SignalWindow(QMainWindow):
         self._video_path: str = ""
         self._video_size: tuple[int, int] = (0, 0)
         self._first_frame: np.ndarray | None = None
-
-        # ROI (x, y, w, h) — либо None (для пикселя)
         self._roi: tuple[int, int, int, int] | None = None
 
         self._curves: list[pg.PlotDataItem] = []
@@ -60,7 +59,8 @@ class SignalWindow(QMainWindow):
         top_panel.addWidget(QLabel("Пространство:"))
         self.combo_space = QComboBox()
         self.combo_space.setFixedWidth(80)
-        self.combo_space.addItems(["RGB", "HSV", "LAB", "YUV"])
+        # YIQ добавлен первым — это ключевое пространство для амплификации
+        self.combo_space.addItems(["YIQ", "RGB", "HSV", "LAB", "YUV"])
         self.combo_space.currentTextChanged.connect(self._on_space_changed)
         top_panel.addWidget(self.combo_space)
 
@@ -112,7 +112,8 @@ class SignalWindow(QMainWindow):
 
         self.setCentralWidget(container)
 
-        self._rebuild_curves("RGB")
+        # Инициализация кривых — YIQ по умолчанию
+        self._rebuild_curves("YIQ")
 
     # ==================== API ====================
 
@@ -164,12 +165,33 @@ class SignalWindow(QMainWindow):
         self._legend = self._fft_plot.addLegend()
 
         configs = {
-            "RGB": [("R", HISTOGRAM_COLOR_R), ("G", HISTOGRAM_COLOR_G), ("B", HISTOGRAM_COLOR_B)],
-            "HSV": [("H", "#ff55ff"), ("S", "#ffaa55"), ("V", HISTOGRAM_COLOR_Y)],
-            "LAB": [("L", HISTOGRAM_COLOR_Y), ("a", HISTOGRAM_COLOR_R), ("b", HISTOGRAM_COLOR_B)],
-            "YUV": [("Y", HISTOGRAM_COLOR_Y), ("U", "#5555ff"), ("V", "#ff5555")],
+            "YIQ": [
+                ("Y", HISTOGRAM_COLOR_Y),
+                ("I", "#ff55ff"),
+                ("Q", "#55ffff"),
+            ],
+            "RGB": [
+                ("R", HISTOGRAM_COLOR_R),
+                ("G", HISTOGRAM_COLOR_G),
+                ("B", HISTOGRAM_COLOR_B),
+            ],
+            "HSV": [
+                ("H", "#ff55ff"),
+                ("S", "#ffaa55"),
+                ("V", HISTOGRAM_COLOR_Y),
+            ],
+            "LAB": [
+                ("L", HISTOGRAM_COLOR_Y),
+                ("a", HISTOGRAM_COLOR_R),
+                ("b", HISTOGRAM_COLOR_B),
+            ],
+            "YUV": [
+                ("Y", HISTOGRAM_COLOR_Y),
+                ("U", "#5555ff"),
+                ("V", "#ff5555"),
+            ],
         }
-        config = configs.get(space, configs["RGB"])
+        config = configs.get(space, configs["YIQ"])
 
         for label, color in config:
             curve = self._fft_plot.plot(pen=pg.mkPen(color, width=1.2), name=label)
@@ -238,24 +260,13 @@ class SignalWindow(QMainWindow):
     # ==================== КОНВЕРТАЦИЯ ====================
 
     def _get_channels(self, rgb_data: np.ndarray, space: str):
-        if space == "RGB":
-            return [rgb_data[:, 0], rgb_data[:, 1], rgb_data[:, 2]], ["R", "G", "B"]
-
-        arr = rgb_data.reshape((-1, 1, 3)).astype(np.uint8)
-        if space == "HSV":
-            converted = cv2.cvtColor(arr, cv2.COLOR_RGB2HSV)
-            labels = ["H", "S", "V"]
-        elif space == "LAB":
-            converted = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
-            labels = ["L", "a", "b"]
-        elif space == "YUV":
-            converted = cv2.cvtColor(arr, cv2.COLOR_RGB2YUV)
-            labels = ["Y", "U", "V"]
-        else:
+        """Возвращает (channels, labels) для пространства."""
+        arr = convert_rgb(rgb_data, space)
+        if arr is None:
             return None, []
 
-        converted = converted.reshape((-1, 3))
-        return [converted[:, 0], converted[:, 1], converted[:, 2]], labels
+        # Для одиночных каналов — разбить на 3 канала
+        return [arr[:, 0], arr[:, 1], arr[:, 2]], get_channel_names(space)
 
     # ==================== ПИКИ ====================
 

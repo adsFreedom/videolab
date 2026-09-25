@@ -1,11 +1,4 @@
-"""Общий модуль CSP (Complex Steerable Pyramid) + YIQ.
-
-Используется обработчиками:
-- yiq_csp (разложение)
-- yiq_csp_inverse (сборка)
-- motion_magnify (потом)
-- color_amplify (потом)
-"""
+"""Общий модуль CSP + YIQ."""
 from processors.csp.utils import (
     rgb_to_yiq,
     yiq_to_rgb,
