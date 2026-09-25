@@ -4,11 +4,10 @@ import cv2
 import pyqtgraph as pg
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox,
+    QPushButton, QComboBox, QApplication,
 )
 from PySide6.QtCore import Qt
 
-from utils.color_conversions import rgb_to_yiq, convert_rgb, get_channel_names
 from desktop.viewers.styles import (
     HISTOGRAM_BG,
     HISTOGRAM_COLOR_R,
@@ -17,10 +16,21 @@ from desktop.viewers.styles import (
     HISTOGRAM_COLOR_Y,
     MEDIA_BUTTON_STYLE,
 )
+from utils.color_conversions import convert_rgb, get_channel_names
+
+
+# Цвет кривых по пространствам
+_CURVE_COLORS = {
+    "RGB": [HISTOGRAM_COLOR_R, HISTOGRAM_COLOR_G, HISTOGRAM_COLOR_B],
+    "YIQ": [HISTOGRAM_COLOR_Y, "#ff55ff", "#55ffff"],
+    "HSV": ["#ff55ff", "#ffaa55", HISTOGRAM_COLOR_Y],
+    "LAB": [HISTOGRAM_COLOR_Y, HISTOGRAM_COLOR_R, HISTOGRAM_COLOR_B],
+    "YUV": [HISTOGRAM_COLOR_Y, "#5555ff", "#ff5555"],
+}
 
 
 class SignalWindow(QMainWindow):
-    """Отдельное окно: FFT-спектр сигнала."""
+    """Отдельное окно: FFT-спектр сигнала + выделение диапазона."""
 
     MAX_PEAKS = 5
 
@@ -28,7 +38,7 @@ class SignalWindow(QMainWindow):
         super().__init__(parent)
 
         self.setWindowTitle("FFT сигнала")
-        self.resize(900, 500)
+        self.resize(900, 600)
 
         pg.setConfigOptions(antialias=True)
 
@@ -43,6 +53,8 @@ class SignalWindow(QMainWindow):
         self._curves: list[pg.PlotDataItem] = []
         self._legend = None
         self._current_peaks: list[float] = []
+        self._current_freqs: np.ndarray | None = None
+        self._current_spectrum: np.ndarray | None = None
 
         self._power_map_window = None
 
@@ -59,7 +71,6 @@ class SignalWindow(QMainWindow):
         top_panel.addWidget(QLabel("Пространство:"))
         self.combo_space = QComboBox()
         self.combo_space.setFixedWidth(80)
-        # YIQ добавлен первым — это ключевое пространство для амплификации
         self.combo_space.addItems(["RGB", "YIQ", "HSV", "LAB", "YUV"])
         self.combo_space.currentTextChanged.connect(self._on_space_changed)
         top_panel.addWidget(self.combo_space)
@@ -93,10 +104,47 @@ class SignalWindow(QMainWindow):
         self._fft_plot.setLabel("bottom", "Частота (Гц)")
         self._fft_plot.setLabel("left", "Амплитуда")
 
+        # Отключаем стандартное меню pyqtgraph
+        self._fft_plot.setMenuEnabled(False)
+        self._fft_plot.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._fft_plot.customContextMenuRequested.connect(self._on_plot_context_menu)
+
         self._legend = self._fft_plot.addLegend()
         self._peak_labels: list[pg.TextItem] = []
 
+        # Регион выделения
+        self._region = pg.LinearRegionItem(
+            values=(0.0, 1.0),
+            brush=pg.mkBrush(79, 193, 255, 40),
+            pen=pg.mkPen("#4fc1ff", width=1),
+            movable=True,
+        )
+        self._region.setZValue(-10)
+        self._region.sigRegionChanged.connect(self._on_region_changed)
+        self._fft_plot.addItem(self._region)
+
         layout.addWidget(self._fft_plot, stretch=1)
+
+        # ==================== СТРОКА ДИАПАЗОНА ====================
+
+        range_row = QHBoxLayout()
+        range_row.setSpacing(8)
+
+        self._range_label = QLabel("Диапазон: —")
+        self._range_label.setStyleSheet(
+            "padding: 4px; font-family: Consolas; font-size: 10pt; font-weight: bold;"
+        )
+        range_row.addWidget(self._range_label)
+
+        range_row.addStretch()
+
+        self._btn_copy_range = QPushButton("Скопировать диапазон")
+        self._btn_copy_range.setStyleSheet(MEDIA_BUTTON_STYLE)
+        self._btn_copy_range.setToolTip("Скопировать в буфер: fmin,fmax")
+        self._btn_copy_range.clicked.connect(self._copy_range)
+        range_row.addWidget(self._btn_copy_range)
+
+        layout.addLayout(range_row)
 
         # ==================== КНОПКИ ====================
 
@@ -146,7 +194,10 @@ class SignalWindow(QMainWindow):
             c.setData([], [])
         self._clear_peaks()
         self._info_label.setText("(нет данных)")
+        self._range_label.setText("Диапазон: —")
         self._current_peaks = []
+        self._current_freqs = None
+        self._current_spectrum = None
 
     # ==================== ПЕРЕСЧЁТ ====================
 
@@ -163,37 +214,12 @@ class SignalWindow(QMainWindow):
             self._fft_plot.removeItem(self._legend)
         self._legend = self._fft_plot.addLegend()
 
-        configs = {
-            "YIQ": [
-                ("Y", HISTOGRAM_COLOR_Y),
-                ("I", "#ff55ff"),
-                ("Q", "#55ffff"),
-            ],
-            "RGB": [
-                ("R", HISTOGRAM_COLOR_R),
-                ("G", HISTOGRAM_COLOR_G),
-                ("B", HISTOGRAM_COLOR_B),
-            ],
-            "HSV": [
-                ("H", "#ff55ff"),
-                ("S", "#ffaa55"),
-                ("V", HISTOGRAM_COLOR_Y),
-            ],
-            "LAB": [
-                ("L", HISTOGRAM_COLOR_Y),
-                ("a", HISTOGRAM_COLOR_R),
-                ("b", HISTOGRAM_COLOR_B),
-            ],
-            "YUV": [
-                ("Y", HISTOGRAM_COLOR_Y),
-                ("U", "#5555ff"),
-                ("V", "#ff5555"),
-            ],
-        }
-        config = configs.get(space, configs["YIQ"])
+        names = get_channel_names(space)
+        colors = _CURVE_COLORS.get(space, _CURVE_COLORS["RGB"])
 
-        for label, color in config:
-            curve = self._fft_plot.plot(pen=pg.mkPen(color, width=1.2), name=label)
+        for i, name in enumerate(names):
+            color = colors[i] if i < len(colors) else "#ffffff"
+            curve = self._fft_plot.plot(pen=pg.mkPen(color, width=1.2), name=name)
             self._curves.append(curve)
 
     def _refresh(self) -> None:
@@ -201,10 +227,13 @@ class SignalWindow(QMainWindow):
             return
 
         space = self.combo_space.currentText()
-        channels, labels = self._get_channels(self._rgb_data, space)
-        if channels is None or len(channels) == 0:
+        arr = convert_rgb(self._rgb_data, space)
+        if arr is None:
             self.clear()
             return
+
+        channels = [arr[:, 0], arr[:, 1], arr[:, 2]]
+        labels = get_channel_names(space)
 
         n = len(self._rgb_data)
         fps = self._fps
@@ -233,6 +262,11 @@ class SignalWindow(QMainWindow):
         self._fft_plot.setTitle(f"FFT-спектр ({space})")
         self._fft_plot.autoRange()
 
+        # Запоминаем для ПКМ
+        self._current_freqs = freqs
+        self._current_spectrum = spectra[0] if spectra else None
+
+        # Пики
         self._clear_peaks()
         peaks = self._find_peaks(freqs, spectra[0], self.MAX_PEAKS) if spectra else []
         self._current_peaks = [p[0] for p in peaks]
@@ -247,6 +281,11 @@ class SignalWindow(QMainWindow):
             self._fft_plot.addItem(label)
             self._peak_labels.append(label)
 
+        # Автоматическое выделение вокруг первого пика
+        if self._current_peaks:
+            self._set_region_around_peak(self._current_peaks[0])
+
+        # Инфо
         duration = n / fps
         info = (
             f"Видео: {self._video_name}   Пространство: {space}   "
@@ -255,17 +294,6 @@ class SignalWindow(QMainWindow):
         if peaks and labels:
             info += f"   |   Пик {labels[0]}: {peaks[0][0]:.2f} Гц"
         self._info_label.setText(info)
-
-    # ==================== КОНВЕРТАЦИЯ ====================
-
-    def _get_channels(self, rgb_data: np.ndarray, space: str):
-        """Возвращает (channels, labels) для пространства."""
-        arr = convert_rgb(rgb_data, space)
-        if arr is None:
-            return None, []
-
-        # Для одиночных каналов — разбить на 3 канала
-        return [arr[:, 0], arr[:, 1], arr[:, 2]], get_channel_names(space)
 
     # ==================== ПИКИ ====================
 
@@ -285,6 +313,80 @@ class SignalWindow(QMainWindow):
                 peaks.append((float(freqs[i]), float(spectrum[i])))
         peaks.sort(key=lambda x: -x[1])
         return peaks[:max_peaks]
+
+    # ==================== РЕГИОН ====================
+
+    def _set_region_around_peak(self, peak_freq: float) -> None:
+        """Автоматически ставит регион вокруг пика ±20%."""
+        width = peak_freq * 0.2
+        if width < 0.05:
+            width = 0.05
+
+        fmin = max(0.0, peak_freq - width)
+        fmax = peak_freq + width
+
+        self._region.blockSignals(True)
+        self._region.setRegion((fmin, fmax))
+        self._region.blockSignals(False)
+
+        self._update_range_label(fmin, fmax)
+
+    def _on_region_changed(self) -> None:
+        fmin, fmax = self._region.getRegion()
+        self._update_range_label(fmin, fmax)
+
+    def _update_range_label(self, fmin: float, fmax: float) -> None:
+        width = fmax - fmin
+        self._range_label.setText(
+            f"Диапазон: {fmin:.3f} – {fmax:.3f} Гц   (ширина {width:.3f})"
+        )
+
+    def _copy_range(self) -> None:
+        """Копирует диапазон в буфер как 'fmin,fmax'."""
+        fmin, fmax = self._region.getRegion()
+        text = f"{fmin:.3f},{fmax:.3f}"
+        QApplication.clipboard().setText(text)
+        self._info_label.setText(f"Скопировано: {text}")
+
+    # ==================== ПКМ-МЕНЮ ====================
+
+    def _on_plot_context_menu(self, pos) -> None:
+        """Своё контекстное меню на графике."""
+        # Позиция в координатах графика
+        view_box = self._fft_plot.getPlotItem().getViewBox()
+        scene_pos = self._fft_plot.mapToScene(pos)
+        view_pos = view_box.mapSceneToView(scene_pos)
+        freq_under_cursor = float(view_pos.x())
+
+        menu = pg.QtWidgets.QMenu(self)
+
+        act_copy_freq = menu.addAction(
+            f"Скопировать частоту: {freq_under_cursor:.3f} Гц"
+        )
+        act_copy_freq.triggered.connect(
+            lambda: self._copy_value(f"{freq_under_cursor:.3f}")
+        )
+
+        menu.addSeparator()
+
+        fmin, fmax = self._region.getRegion()
+
+        act_copy_fmin = menu.addAction(f"Скопировать fmin: {fmin:.3f}")
+        act_copy_fmin.triggered.connect(lambda: self._copy_value(f"{fmin:.3f}"))
+
+        act_copy_fmax = menu.addAction(f"Скопировать fmax: {fmax:.3f}")
+        act_copy_fmax.triggered.connect(lambda: self._copy_value(f"{fmax:.3f}"))
+
+        act_copy_range = menu.addAction(
+            f"Скопировать диапазон: {fmin:.3f},{fmax:.3f}"
+        )
+        act_copy_range.triggered.connect(self._copy_range)
+
+        menu.exec(self._fft_plot.mapToGlobal(pos))
+
+    def _copy_value(self, text: str) -> None:
+        QApplication.clipboard().setText(text)
+        self._info_label.setText(f"Скопировано: {text}")
 
     # ==================== КАРТА МОЩНОСТИ ====================
 
