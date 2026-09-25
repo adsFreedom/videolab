@@ -86,7 +86,7 @@ class PowerMapWindow(QMainWindow):
         top.addWidget(QLabel("Пространство:"))
         self.combo_space = QComboBox()
         self.combo_space.setFixedWidth(80)
-        self.combo_space.addItems(["YIQ", "RGB", "HSV", "LAB", "YUV"])
+        self.combo_space.addItems(["RGB", "YIQ", "HSV", "LAB", "YUV"])
         self.combo_space.currentTextChanged.connect(lambda _: self._update_labels())
         top.addWidget(self.combo_space)
 

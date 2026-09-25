@@ -60,7 +60,7 @@ class SignalWindow(QMainWindow):
         self.combo_space = QComboBox()
         self.combo_space.setFixedWidth(80)
         # YIQ добавлен первым — это ключевое пространство для амплификации
-        self.combo_space.addItems(["YIQ", "RGB", "HSV", "LAB", "YUV"])
+        self.combo_space.addItems(["RGB", "YIQ", "HSV", "LAB", "YUV"])
         self.combo_space.currentTextChanged.connect(self._on_space_changed)
         top_panel.addWidget(self.combo_space)
 
@@ -112,8 +112,7 @@ class SignalWindow(QMainWindow):
 
         self.setCentralWidget(container)
 
-        # Инициализация кривых — YIQ по умолчанию
-        self._rebuild_curves("YIQ")
+        self._rebuild_curves("RGB")
 
     # ==================== API ====================
 
