@@ -8,6 +8,7 @@ from processors.csp.utils import (
     reconstruct_from_bands,
     split_real_imag,
     find_frames_source,
+    temporal_bandpass,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "reconstruct_from_bands",
     "split_real_imag",
     "find_frames_source",
+    "temporal_bandpass",
 ]

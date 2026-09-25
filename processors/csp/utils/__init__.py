@@ -11,6 +11,7 @@ from processors.csp.utils.steerable import (
     split_real_imag,
 )
 from processors.csp.utils.project_utils import find_frames_source
+from processors.csp.utils.temporal import temporal_bandpass
 
 __all__ = [
     "rgb_to_yiq",
@@ -21,4 +22,5 @@ __all__ = [
     "reconstruct_from_bands",
     "split_real_imag",
     "find_frames_source",
+    "temporal_bandpass",
 ]
