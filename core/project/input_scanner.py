@@ -5,17 +5,22 @@ from pathlib import Path
 from core.processors import ProcessorRegistry
 
 
-def scan_for_inputs(project_root: Path, start_path: str, mask: str) -> list[str]:
-    """Ищет файлы по маске вверх по дереву до корня проекта."""
+def scan_for_inputs(project_root, start_path, mask):
+    """Ищет файлы по маске вверх по дереву. Поддерживает '|' — несколько масок."""
     start_path = Path(start_path).resolve()
+    masks = [m.strip() for m in mask.split("|")]
     results = []
 
     current = start_path
     while True:
         if current.is_dir():
             for item in sorted(current.iterdir()):
-                if item.is_file() and fnmatch.fnmatch(item.name, mask):
-                    results.append(str(item))
+                if not item.is_file():
+                    continue
+                for m in masks:
+                    if fnmatch.fnmatch(item.name, m):
+                        results.append(str(item))
+                        break
 
         if current == project_root:
             break
