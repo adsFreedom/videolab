@@ -1,5 +1,8 @@
 """Обработчики VideoLab. Импорт модулей регистрирует обработчики."""
 from processors import crop
 from processors import extract_frames
-from processors import resize  # noqa: F401
-from processors.yiq_steerable import YIQSteerableProcessor  # noqa: F401
+from processors import resize
+from processors.yiq_csp import YIQCSPProcessor
+from processors.yiq_csp_inverse import YIQCSPInverseProcessor
+
+__all__ = []
