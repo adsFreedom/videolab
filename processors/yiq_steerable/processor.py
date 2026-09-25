@@ -1,6 +1,7 @@
 """Обработчик: YIQ + Complex Steerable Pyramid (только по Y)."""
 import numpy as np
 import cv2
+import json
 from pathlib import Path
 
 from core.processors import BaseProcessor, ProcessorRegistry
@@ -98,15 +99,20 @@ class YIQSteerableProcessor(BaseProcessor):
             frame_dir = frames_dir / f"frame_{frame_idx:04d}"
             frame_dir.mkdir(parents=True, exist_ok=True)
 
-            # --- Y → Steerable Pyramid ---
-            y_norm = self._normalize_for_pyramid(y).astype(np.float32)
+            # === Y → Steerable Pyramid ===
+            y_min = float(y.min())
+            y_max = float(y.max())
+
+            y_norm = self._normalize(y, y_min, y_max).astype(np.float32)
             pyramid = build_pyramid(y_norm, levels=levels, orientations=orientations)
 
+            # Lowpass
             if pyramid["lowpass"] is not None:
                 lp_path = frame_dir / "Y_lowpass.npy"
                 np.save(str(lp_path), pyramid["lowpass"])
                 output_files.append(str(lp_path.relative_to(output_dir)))
 
+            # Bands
             for (level, orient), coeff in pyramid["bands"].items():
                 real, imag = split_real_imag(coeff)
 
@@ -124,7 +130,17 @@ class YIQSteerableProcessor(BaseProcessor):
                     self._save_png(amplitude, png_path)
                     output_files.append(str(png_path.relative_to(output_dir)))
 
-            # --- I и Q — как есть ---
+            # === Y_meta.json — для денормализации ===
+            y_meta_path = frame_dir / "Y_meta.json"
+            y_meta = {
+                "y_min": y_min,
+                "y_max": y_max,
+            }
+            with open(y_meta_path, "w", encoding="utf-8") as f:
+                json.dump(y_meta, f)
+            output_files.append(str(y_meta_path.relative_to(output_dir)))
+
+            # === I и Q — как есть ===
             i_path = frame_dir / "I.npy"
             q_path = frame_dir / "Q.npy"
             np.save(str(i_path), i.astype(np.float32))
@@ -165,9 +181,7 @@ class YIQSteerableProcessor(BaseProcessor):
         }
 
     @staticmethod
-    def _normalize_for_pyramid(data: np.ndarray) -> np.ndarray:
-        d_min = data.min()
-        d_max = data.max()
+    def _normalize(data: np.ndarray, d_min: float, d_max: float) -> np.ndarray:
         if d_max - d_min > 1e-8:
             return (data - d_min) / (d_max - d_min)
         return np.zeros_like(data, dtype=np.float32)
